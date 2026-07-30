@@ -1,0 +1,44 @@
+name: Release
+
+on:
+    workflow_dispatch:
+        inputs:
+            tag_name:
+                description: "Tag name for the release (e.g., v1.2.3)"
+                required: true
+                type: string
+    workflow_call:
+        inputs:
+            tag_name:
+                description: "Tag name for the release (e.g., v1.2.3)"
+                required: true
+                type: string
+
+permissions:
+    contents: write
+
+jobs:
+    release:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+              with:
+                  fetch-depth: 0
+                  ref: ${{ inputs.tag_name || github.event.inputs.tag_name }}
+
+            - name: Generate changelog
+              id: changelog
+              uses: orhun/git-cliff-action@f50e11560dce63f7c33227798f90b924471a88b5 # v4.8.0
+              with:
+                  config: cliff.toml
+                  args: --current --verbose
+              env:
+                  OUTPUT: CHANGELOG.md
+
+            - name: Create Release
+              uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3
+              with:
+                  tag_name: ${{ inputs.tag_name || github.event.inputs.tag_name }}
+                  body: ${{ steps.changelog.outputs.content }}
+                  draft: false
+                  prerelease: ${{ contains(inputs.tag_name || github.event.inputs.tag_name, 'alpha') || contains(inputs.tag_name || github.event.inputs.tag_name, 'beta') }}
