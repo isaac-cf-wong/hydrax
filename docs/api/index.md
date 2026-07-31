@@ -8,6 +8,9 @@ geometry, and time-domain gravitational-wave polarizations:
 - `Observer`
 - `FiniteDifference`
 - `Waveform`
+- `Window`
+- `WaveformSpectrum`
+- `ComplexAmplitude`
 - `waveform_from_quadrupole`
 - `sinusoidal_quadrupole`
 

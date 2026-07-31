@@ -4,7 +4,8 @@ use std::io::{BufWriter, Write};
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use hydrax::{
-    FiniteDifference, Observer, PARSEC_M, sinusoidal_quadrupole, waveform_from_quadrupole,
+    FiniteDifference, Observer, PARSEC_M, Waveform, Window, sinusoidal_quadrupole,
+    waveform_from_quadrupole,
 };
 
 /// Core-collapse supernova gravitational-wave simulation tools.
@@ -47,12 +48,34 @@ struct DemoArgs {
     /// Centered finite-difference stencil.
     #[arg(long, value_enum, default_value_t = DifferenceArg::FivePoint)]
     difference: DifferenceArg,
+    /// Select time-domain or frequency-domain CSV output.
+    #[arg(long, value_enum, default_value_t = OutputArg::Time)]
+    output: OutputArg,
+    /// Window used for frequency-domain output.
+    #[arg(long, value_enum, default_value_t = WindowArg::Hann)]
+    window: WindowArg,
+    /// Taper fraction when `--window tukey` is selected.
+    #[arg(long, default_value_t = 0.5)]
+    tukey_alpha: f64,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
 enum DifferenceArg {
     ThreePoint,
     FivePoint,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum OutputArg {
+    Time,
+    Spectrum,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum WindowArg {
+    Rectangular,
+    Hann,
+    Tukey,
 }
 
 impl From<DifferenceArg> for FiniteDifference {
@@ -107,11 +130,50 @@ fn write_demo(arguments: &DemoArgs) -> Result<(), Box<dyn std::error::Error>> {
     )?;
     let waveform = waveform_from_quadrupole(&source, observer, arguments.difference.into())?;
 
+    match arguments.output {
+        OutputArg::Time => write_time_domain(&waveform),
+        OutputArg::Spectrum => write_spectrum(
+            &waveform,
+            match arguments.window {
+                WindowArg::Rectangular => Window::Rectangular,
+                WindowArg::Hann => Window::Hann,
+                WindowArg::Tukey => Window::Tukey {
+                    alpha: arguments.tukey_alpha,
+                },
+            },
+        ),
+    }
+}
+
+fn write_time_domain(waveform: &Waveform) -> Result<(), Box<dyn std::error::Error>> {
     let mut output = BufWriter::new(std::io::stdout().lock());
     writeln!(output, "time_s,h_plus,h_cross")?;
     for (index, (h_plus, h_cross)) in waveform.h_plus().iter().zip(waveform.h_cross()).enumerate() {
         let time = waveform.time_s(index).ok_or("waveform index is invalid")?;
         writeln!(output, "{time:.16e},{h_plus:.16e},{h_cross:.16e}")?;
+    }
+    Ok(())
+}
+
+fn write_spectrum(waveform: &Waveform, window: Window) -> Result<(), Box<dyn std::error::Error>> {
+    let spectrum = waveform.spectrum(window)?;
+    let mut output = BufWriter::new(std::io::stdout().lock());
+    writeln!(
+        output,
+        "frequency_hz,h_plus_real_s,h_plus_imaginary_s,h_cross_real_s,h_cross_imaginary_s"
+    )?;
+    for (index, (h_plus, h_cross)) in spectrum.h_plus().iter().zip(spectrum.h_cross()).enumerate() {
+        let frequency = spectrum
+            .frequency_hz(index)
+            .ok_or("spectrum index is invalid")?;
+        writeln!(
+            output,
+            "{frequency:.16e},{:.16e},{:.16e},{:.16e},{:.16e}",
+            h_plus.real_s(),
+            h_plus.imaginary_s(),
+            h_cross.real_s(),
+            h_cross.imaginary_s()
+        )?;
     }
     Ok(())
 }

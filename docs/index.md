@@ -25,5 +25,11 @@ cargo test --all-features
 cargo run -- demo > waveform.csv
 ```
 
+For frequency-domain output:
+
+```shell
+cargo run -- demo --output spectrum --window hann > spectrum.csv
+```
+
 See the [quadrupole waveform design](design/quadrupole-waveforms.md) for the
 equations, conventions, and validity limits.

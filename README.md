@@ -20,13 +20,14 @@ behind a small, versioned interface.
 > verification and is not yet a complete CCSN simulation. No published results
 > should currently be based on it.
 
-## Planned first milestone
+## First milestone
 
 The first scientific milestone generates observer-dependent gravitational-wave
-polarizations from a prescribed mass-quadrupole time series. The time-domain
-foundation is implemented with second- and fourth-order centered finite
-differences and is verified against analytic sources, symmetry constraints,
-distance scaling, and convergence tests.
+polarizations from a prescribed mass-quadrupole time series. The time- and
+frequency-domain foundation now includes second- and fourth-order centered
+finite differences, explicit Fourier normalization, and configurable window
+functions. It is verified against analytic sources, symmetry constraints,
+distance scaling, convergence tests, and exact discrete spectra.
 
 Later milestones will add spherical hydrodynamics, relativistic collapse and
 bounce, axisymmetric rotation, realistic equations of state, and neutrino
@@ -51,6 +52,12 @@ Generate a demonstration waveform as CSV:
 cargo run -- demo > waveform.csv
 ```
 
+Generate its nonnegative-frequency spectrum with a Hann window:
+
+```shell
+cargo run -- demo --output spectrum --window hann > spectrum.csv
+```
+
 The public library API accepts SI units explicitly:
 
 ```rust
@@ -72,8 +79,10 @@ let waveform = waveform_from_quadrupole(
     observer,
     FiniteDifference::FivePoint,
 )?;
+let spectrum = waveform.spectrum(hydrax::Window::Hann)?;
 
 assert_eq!(waveform.h_plus().len(), 1020);
+assert_eq!(spectrum.h_plus().len(), 511);
 # Ok::<(), hydrax::WaveformError>(())
 ```
 

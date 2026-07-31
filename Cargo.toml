@@ -16,6 +16,7 @@ exclude = ["/.github"]
 
 [dependencies]
 clap = { version = "4.6.4", features = ["derive"] }
+rustfft = "6.4.1"
 
 [dev-dependencies]
 assert_cmd = "=2.2.2"
