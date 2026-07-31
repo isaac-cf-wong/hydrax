@@ -50,6 +50,7 @@ struct Output {
     schema: &'static str,
 }
 
+/// Serialize one demo run and its build metadata to a JSON sidecar.
 pub fn write(
     path: &Path,
     configuration: &DemoArgs,
@@ -87,6 +88,7 @@ pub fn write(
     Ok(())
 }
 
+/// Decode dependency records embedded by the build script.
 fn dependencies() -> Vec<Dependency> {
     split_nonempty(env!("HYDRAX_DEPENDENCIES"), ';')
         .into_iter()
@@ -97,6 +99,7 @@ fn dependencies() -> Vec<Dependency> {
         .collect()
 }
 
+/// Split a delimited build value while omitting its empty representation.
 fn split_nonempty(value: &'static str, separator: char) -> Vec<&'static str> {
     value
         .split(separator)

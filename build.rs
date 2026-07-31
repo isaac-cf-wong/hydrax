@@ -1,7 +1,13 @@
 //! Capture reproducibility metadata for provenance sidecars.
 
-use std::{env, fs, process::Command};
+use std::{
+    env,
+    ffi::{OsStr, OsString},
+    fs,
+    process::Command,
+};
 
+/// Export source, toolchain, target, feature, and dependency metadata.
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=Cargo.lock");
@@ -10,13 +16,14 @@ fn main() {
     println!("cargo:rerun-if-changed=.git/HEAD");
     println!("cargo:rerun-if-changed=.git/index");
 
+    let rustc = env::var_os("RUSTC").unwrap_or_else(|| OsString::from("rustc"));
     emit(
         "HYDRAX_RUSTC_VERSION",
-        command_output("rustc", &["--version"]),
+        command_output(&rustc, &["--version"]),
     );
     emit(
         "HYDRAX_GIT_REVISION",
-        command_output("git", &["rev-parse", "HEAD"]),
+        command_output(OsStr::new("git"), &["rev-parse", "HEAD"]),
     );
     emit("HYDRAX_SOURCE_STATE", source_state());
     emit(
@@ -31,11 +38,13 @@ fn main() {
     emit("HYDRAX_DEPENDENCIES", resolved_dependencies());
 }
 
+/// Expose one metadata value to the package compilation.
 fn emit(name: &str, value: impl AsRef<str>) {
     println!("cargo:rustc-env={name}={}", value.as_ref());
 }
 
-fn command_output(program: &str, arguments: &[&str]) -> String {
+/// Run a metadata command and map unavailable output to `unknown`.
+fn command_output(program: &OsStr, arguments: &[&str]) -> String {
     Command::new(program)
         .args(arguments)
         .output()
@@ -47,6 +56,7 @@ fn command_output(program: &str, arguments: &[&str]) -> String {
         .unwrap_or_else(|| "unknown".to_owned())
 }
 
+/// Report whether the Git working tree matched its revision at build time.
 fn source_state() -> String {
     Command::new("git")
         .args(["status", "--porcelain", "--untracked-files=normal"])
@@ -65,6 +75,7 @@ fn source_state() -> String {
         )
 }
 
+/// Return a stable comma-separated list of enabled Cargo features.
 fn enabled_features() -> String {
     let mut features = env::vars()
         .filter_map(|(name, _)| name.strip_prefix("CARGO_FEATURE_").map(str::to_owned))
@@ -74,6 +85,7 @@ fn enabled_features() -> String {
     features.join(",")
 }
 
+/// Return resolved package names and versions from the Cargo lockfile.
 fn resolved_dependencies() -> String {
     let Ok(lockfile) = fs::read_to_string("Cargo.lock") else {
         return String::new();
@@ -99,6 +111,7 @@ fn resolved_dependencies() -> String {
     dependencies.join(";")
 }
 
+/// Extract a quoted TOML scalar from a Cargo lockfile line.
 fn quoted_value<'a>(line: &'a str, key: &str) -> Option<&'a str> {
     line.strip_prefix(&format!("{key} = \""))?.strip_suffix('"')
 }

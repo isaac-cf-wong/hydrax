@@ -101,6 +101,28 @@ fn demo_rejects_invalid_tukey_fraction() {
 }
 
 #[test]
+fn demo_rejects_non_finite_inactive_tukey_fraction() {
+    let mut command = Command::cargo_bin("hydrax").expect("binary exists");
+
+    command
+        .args(["demo", "--output", "time", "--tukey-alpha", "NaN"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Tukey alpha must be finite"));
+}
+
+#[test]
+fn demo_rejects_non_finite_inactive_distance() {
+    let mut command = Command::cargo_bin("hydrax").expect("binary exists");
+
+    command
+        .args(["demo", "--output", "energy", "--distance-kpc", "NaN"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("distance must be finite"));
+}
+
+#[test]
 fn demo_emits_energy_csv() {
     let mut command = Command::cargo_bin("hydrax").expect("binary exists");
 

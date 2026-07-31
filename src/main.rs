@@ -84,6 +84,7 @@ enum OutputArg {
 }
 
 impl OutputArg {
+    /// Return the stable schema identifier for this CSV output.
     const fn schema(self) -> &'static str {
         match self {
             Self::Time => "hydrax.waveform.time.csv.v1",
@@ -128,10 +129,12 @@ fn write_demo(arguments: &DemoArgs) -> Result<(), Box<dyn std::error::Error>> {
     validate_positive("sample rate", arguments.sample_rate_hz)?;
     validate_positive("frequency", arguments.frequency_hz)?;
     validate_finite("amplitude", arguments.amplitude_kg_m2)?;
+    validate_finite("distance", arguments.distance_kpc)?;
+    validate_finite("inclination", arguments.inclination_deg)?;
+    validate_finite("azimuth", arguments.azimuth_deg)?;
+    validate_finite("Tukey alpha", arguments.tukey_alpha)?;
     if matches!(arguments.output, OutputArg::Time | OutputArg::Spectrum) {
         validate_positive("distance", arguments.distance_kpc)?;
-        validate_finite("inclination", arguments.inclination_deg)?;
-        validate_finite("azimuth", arguments.azimuth_deg)?;
     }
 
     let interval_count = (arguments.duration_s * arguments.sample_rate_hz).round();
@@ -190,6 +193,7 @@ fn write_time_domain(waveform: &Waveform) -> Result<(), Box<dyn std::error::Erro
         let time = waveform.time_s(index).ok_or("waveform index is invalid")?;
         writeln!(output, "{time:.16e},{h_plus:.16e},{h_cross:.16e}")?;
     }
+    output.flush()?;
     Ok(())
 }
 
@@ -213,6 +217,7 @@ fn write_spectrum(waveform: &Waveform, window: Window) -> Result<(), Box<dyn std
             h_cross.imaginary_s()
         )?;
     }
+    output.flush()?;
     Ok(())
 }
 
@@ -232,6 +237,7 @@ fn write_energy(diagnostics: &EnergyDiagnostics) -> Result<(), Box<dyn std::erro
         diagnostics.total_energy_j(),
         diagnostics.average_power_w()
     )?;
+    output.flush()?;
     Ok(())
 }
 
