@@ -1,25 +1,26 @@
-//! Integration tests for the sample command-line interface.
+//! Integration tests for the Hydrax command-line interface.
 
 use assert_cmd::Command;
 use predicates::prelude::predicate;
 
 #[test]
-fn cli_prints_default_greeting() {
-    let mut command = Command::cargo_bin("rust-package-template").expect("binary exists");
+fn cli_reports_package_name_in_help() {
+    let mut command = Command::cargo_bin("hydrax").expect("binary exists");
 
     command
+        .arg("--help")
         .assert()
         .success()
-        .stdout(predicate::str::contains("Hello, world!"));
+        .stdout(predicate::str::contains("Core-collapse supernova"));
 }
 
 #[test]
-fn cli_prints_named_greeting() {
-    let mut command = Command::cargo_bin("rust-package-template").expect("binary exists");
+fn cli_reports_version() {
+    let mut command = Command::cargo_bin("hydrax").expect("binary exists");
 
     command
-        .arg("Ferris")
+        .arg("--version")
         .assert()
         .success()
-        .stdout(predicate::str::contains("Hello, Ferris!"));
+        .stdout(predicate::str::contains("hydrax 0.1.0"));
 }

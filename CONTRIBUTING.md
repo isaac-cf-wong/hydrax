@@ -1,6 +1,6 @@
-# Contributing to rust-package-template
+# Contributing to Hydrax
 
-Thank you for your interest in contributing to `rust-package-template`.
+Thank you for your interest in contributing to Hydrax.
 
 ## Development
 

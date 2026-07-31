@@ -1,8 +1,14 @@
-# Rust Package Template
+# Hydrax
 
-This repository is a starting point for Rust crates that need a library,
-optional CLI, tests, documentation, CI, release automation, and project hygiene
-files.
+Hydrax is an early-stage Rust package for verified simulations of
+gravitational waves from core-collapse supernovae.
+
+The implementation will progress from analytic quadrupole waveforms through
+verified collapse hydrodynamics to relativistic multidimensional models. Rust
+will provide the safe public API and orchestration, with optional portable C
+kernels for performance-critical calculations.
+
+Hydrax does not yet provide a scientific simulation API.
 
 ## Local Checks
 
@@ -12,10 +18,8 @@ cargo clippy --all-targets --all-features -- -D warnings
 cargo test --all-features
 ```
 
-## Example
+## Current command
 
-```rust
-use rust_package_template::greeting;
-
-assert_eq!(greeting("Ferris").unwrap(), "Hello, Ferris!");
+```shell
+cargo run -- --help
 ```

@@ -1,7 +1,4 @@
-//! Library entry point for `rust-package-template`.
+//! Core-collapse supernova gravitational-wave simulation tools.
 //!
-//! Replace this sample module with the library API for your package.
-
-mod message;
-
-pub use message::{GreetingError, greeting};
+//! Hydrax is in early development. Its first scientific milestone will provide
+//! verified waveform generation from prescribed source quadrupoles.

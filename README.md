@@ -1,24 +1,64 @@
-# Rust Package Template
+# Hydrax
 
-[![CI](https://github.com/isaac-cf-wong/rust-package-template/actions/workflows/ci.yml/badge.svg)](https://github.com/isaac-cf-wong/rust-package-template/actions/workflows/ci.yml)
-[![Documentation Status](https://github.com/isaac-cf-wong/rust-package-template/actions/workflows/documentation.yml/badge.svg)](https://isaac-cf-wong.github.io/rust-package-template/)
-[![Crates.io](https://img.shields.io/crates/v/rust-package-template)](https://crates.io/crates/rust-package-template)
-[![Docs.rs](https://docs.rs/rust-package-template/badge.svg)](https://docs.rs/rust-package-template)
+[![CI](https://github.com/isaac-cf-wong/hydrax/actions/workflows/ci.yml/badge.svg)](https://github.com/isaac-cf-wong/hydrax/actions/workflows/ci.yml)
+[![Documentation Status](https://github.com/isaac-cf-wong/hydrax/actions/workflows/documentation.yml/badge.svg)](https://isaac-cf-wong.github.io/hydrax/)
+[![Crates.io](https://img.shields.io/crates/v/hydrax)](https://crates.io/crates/hydrax)
+[![Docs.rs](https://docs.rs/hydrax/badge.svg)](https://docs.rs/hydrax)
 [![License](https://img.shields.io/badge/License-BSD_3--Clause-blue.svg)](LICENSE)
 
-This project is a template for creating Rust packages with a standardized
-library, CLI, documentation, testing, linting, release, and repository
-customization setup.
+Hydrax is a Rust package for developing verified simulations of gravitational
+waves from core-collapse supernovae. It will grow incrementally from analytic
+quadrupole waveforms and idealized collapse models toward relativistic
+multidimensional radiation hydrodynamics.
 
-## Getting Started
+Rust will provide the safe public API, simulation orchestration, testing, and
+I/O. Performance-critical numerical kernels may be implemented in portable C
+behind a small, versioned interface.
 
-Use **Use this template** on GitHub, then read
-[`docs/template_documentation/`](docs/template_documentation/) for onboarding,
-development, and customization notes. Delete that directory and the
-**Template documentation** `nav` block in `zensical.toml` when you no longer
-need them. Develop your library under `src/`.
+> [!IMPORTANT]
+> Hydrax is in early development and does not yet provide a scientific
+> simulation API. No published results should currently be based on it.
+
+## Planned first milestone
+
+The first scientific release will generate observer-dependent gravitational
+wave polarizations from a prescribed mass-quadrupole time series. It will be
+verified against analytic sources, symmetry constraints, distance scaling, and
+convergence tests before collapse hydrodynamics is introduced.
+
+Later milestones will add spherical hydrodynamics, relativistic collapse and
+bounce, axisymmetric rotation, realistic equations of state, and neutrino
+transport. Exact spherical symmetry is a verification stage: it emits no
+gravitational waves, so the first coupled collapse-and-waveform calculation
+requires at least axisymmetry.
+
+## Development
+
+Install the stable Rust toolchain, then run the local quality checks:
 
 ```shell
-cargo test
-cargo run -- Ferris
+cargo fmt --all --check
+cargo clippy --all-targets --all-features -- -D warnings
+cargo test --all-features
+cargo doc --no-deps --all-features
 ```
+
+The placeholder command currently exposes package help and version information:
+
+```shell
+cargo run -- --help
+```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the complete development workflow.
+
+## Documentation
+
+- [Project documentation](https://isaac-cf-wong.github.io/hydrax/)
+- [Rust API documentation](https://docs.rs/hydrax)
+- [Issue tracker](https://github.com/isaac-cf-wong/hydrax/issues)
+- [Discussions](https://github.com/isaac-cf-wong/hydrax/discussions)
+
+## License and citation
+
+Hydrax is distributed under the [3-Clause BSD License](LICENSE). Citation
+metadata are provided in [CITATION.cff](CITATION.cff).
