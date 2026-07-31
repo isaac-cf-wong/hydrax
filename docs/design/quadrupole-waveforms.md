@@ -105,6 +105,41 @@ the window's coherent gain. That gain is reported separately so amplitude
 corrections can be made explicitly when appropriate. A Tukey taper fraction of
 zero is rectangular, while one is Hann.
 
+## Luminosity and radiated energy
+
+For an STF mass quadrupole, the leading-order angle-integrated GW luminosity is
+
+\[
+P(t) = \frac{G}{5c^5}\dddot Q_{ij}(t)\dddot Q_{ij}(t).
+\]
+
+The Cartesian contraction includes each off-diagonal component twice. Hydrax
+projects the numerical third derivative to its trace-free part, making the
+diagnostic invariant under addition of an arbitrary isotropic trace to the
+input. Power is returned in watts and is nonnegative by construction. Total
+energy in joules is computed with trapezoidal integration over the retained
+power samples.
+
+The available centered third-derivative stencils are
+
+\[
+f'''_n = \frac{-f_{n-2}+2f_{n-1}-2f_{n+1}+f_{n+2}}
+{2\Delta t^3} + O(\Delta t^2),
+\]
+
+\[
+f'''_n = \frac{f_{n-3}-8f_{n-2}+13f_{n-1}-13f_{n+1}
++8f_{n+2}-f_{n+3}}{8\Delta t^3} + O(\Delta t^4).
+\]
+
+As with waveform differentiation, Hydrax discards boundary samples rather than
+lowering the formal order. Third derivatives amplify high-frequency noise even
+more strongly than waveform extraction, so energies from simulation data must
+be accompanied by temporal-resolution and filtering studies. Stress-formula
+extraction is planned once hydrodynamic source fields are available. The
+quadrupole approach and its finite-difference limitations follow the analysis
+of [Finn and Evans (1990)](https://doi.org/10.1086/168497).
+
 ## Verification requirements
 
 The time-domain implementation is accepted only if it demonstrates:
@@ -113,12 +148,15 @@ The time-domain implementation is accepted only if it demonstrates:
 - analytic amplitude and phase for a sinusoidal trace-free source;
 - inverse-distance scaling;
 - invariance under addition of an isotropic trace;
-- the advertised finite-difference convergence order; and
-- rejection of non-finite samples and invalid observer distances.
+- the advertised finite-difference convergence order;
+- rejection of non-finite samples and invalid observer distances;
 - exact discrete-transform normalization for DC and bin-centered sinusoids;
 - preservation of magnitude and rotation of phase under a time-origin shift;
 - agreement of Tukey's limiting cases with rectangular and Hann windows; and
-- rejection of invalid window parameters.
+- rejection of invalid window parameters;
+- analytic luminosity and integrated energy for a sinusoidal quadrupole;
+- trace invariance and zero energy for spherical motion; and
+- the advertised third-derivative convergence order.
 
-Radiated-energy estimates, file formats, and provenance records are subsequent
-parts of the first milestone.
+File formats and provenance records are subsequent parts of the first
+milestone.

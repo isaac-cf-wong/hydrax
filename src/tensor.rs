@@ -56,6 +56,21 @@ impl SymmetricTensor3 {
             + left[1] * (xy * right[0] + yy * right[1] + yz * right[2])
             + left[2] * (xz * right[0] + yz * right[1] + zz * right[2])
     }
+
+    /// Return the Cartesian contraction `Tᵢⱼ Tᵢⱼ`.
+    ///
+    /// Off-diagonal components occur twice in the full tensor contraction.
+    #[must_use]
+    pub fn norm_squared(self) -> f64 {
+        let [xx, yy, zz, xy, xz, yz] = self.components;
+        xx.mul_add(
+            xx,
+            yy.mul_add(
+                yy,
+                zz.mul_add(zz, 2.0 * (xy.mul_add(xy, xz.mul_add(xz, yz * yz)))),
+            ),
+        )
+    }
 }
 
 impl Add for SymmetricTensor3 {
@@ -117,5 +132,11 @@ mod tests {
         let tensor = SymmetricTensor3::new(1.0, 2.0, 3.0, 4.0, 5.0, 6.0);
         let value = tensor.contract([1.0, 2.0, 3.0], [4.0, 5.0, 6.0]);
         assert!((value - 382.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn norm_counts_off_diagonal_components_twice() {
+        let tensor = SymmetricTensor3::new(1.0, 2.0, 3.0, 4.0, 5.0, 6.0);
+        assert!((tensor.norm_squared() - 168.0).abs() < f64::EPSILON);
     }
 }

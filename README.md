@@ -58,6 +58,12 @@ Generate its nonnegative-frequency spectrum with a Hann window:
 cargo run -- demo --output spectrum --window hann > spectrum.csv
 ```
 
+Estimate the quadrupole luminosity and total radiated energy:
+
+```shell
+cargo run -- demo --output energy
+```
+
 The public library API accepts SI units explicitly:
 
 ```rust
@@ -80,9 +86,14 @@ let waveform = waveform_from_quadrupole(
     FiniteDifference::FivePoint,
 )?;
 let spectrum = waveform.spectrum(hydrax::Window::Hann)?;
+let energy = hydrax::radiated_energy(
+    &source,
+    hydrax::ThirdDerivativeStencil::SevenPoint,
+)?;
 
 assert_eq!(waveform.h_plus().len(), 1020);
 assert_eq!(spectrum.h_plus().len(), 511);
+assert!(energy.total_energy_j() > 0.0);
 # Ok::<(), hydrax::WaveformError>(())
 ```
 

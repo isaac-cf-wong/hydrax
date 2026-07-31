@@ -4,8 +4,8 @@ use std::io::{BufWriter, Write};
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use hydrax::{
-    FiniteDifference, Observer, PARSEC_M, Waveform, Window, sinusoidal_quadrupole,
-    waveform_from_quadrupole,
+    EnergyDiagnostics, FiniteDifference, Observer, PARSEC_M, ThirdDerivativeStencil, Waveform,
+    Window, radiated_energy, sinusoidal_quadrupole, waveform_from_quadrupole,
 };
 
 /// Core-collapse supernova gravitational-wave simulation tools.
@@ -69,6 +69,7 @@ enum DifferenceArg {
 enum OutputArg {
     Time,
     Spectrum,
+    Energy,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -104,10 +105,12 @@ fn write_demo(arguments: &DemoArgs) -> Result<(), Box<dyn std::error::Error>> {
     validate_positive("duration", arguments.duration_s)?;
     validate_positive("sample rate", arguments.sample_rate_hz)?;
     validate_positive("frequency", arguments.frequency_hz)?;
-    validate_positive("distance", arguments.distance_kpc)?;
     validate_finite("amplitude", arguments.amplitude_kg_m2)?;
-    validate_finite("inclination", arguments.inclination_deg)?;
-    validate_finite("azimuth", arguments.azimuth_deg)?;
+    if matches!(arguments.output, OutputArg::Time | OutputArg::Spectrum) {
+        validate_positive("distance", arguments.distance_kpc)?;
+        validate_finite("inclination", arguments.inclination_deg)?;
+        validate_finite("azimuth", arguments.azimuth_deg)?;
+    }
 
     let interval_count = (arguments.duration_s * arguments.sample_rate_hz).round();
     if !interval_count.is_finite() || interval_count > f64::from(u32::MAX - 1) {
@@ -123,25 +126,34 @@ fn write_demo(arguments: &DemoArgs) -> Result<(), Box<dyn std::error::Error>> {
         1.0 / arguments.sample_rate_hz,
         sample_count,
     )?;
-    let observer = Observer::new(
-        arguments.distance_kpc * 1000.0 * PARSEC_M,
-        arguments.inclination_deg.to_radians(),
-        arguments.azimuth_deg.to_radians(),
-    )?;
-    let waveform = waveform_from_quadrupole(&source, observer, arguments.difference.into())?;
-
     match arguments.output {
-        OutputArg::Time => write_time_domain(&waveform),
-        OutputArg::Spectrum => write_spectrum(
-            &waveform,
-            match arguments.window {
-                WindowArg::Rectangular => Window::Rectangular,
-                WindowArg::Hann => Window::Hann,
-                WindowArg::Tukey => Window::Tukey {
-                    alpha: arguments.tukey_alpha,
-                },
-            },
-        ),
+        OutputArg::Energy => {
+            let diagnostics = radiated_energy(&source, ThirdDerivativeStencil::SevenPoint)?;
+            write_energy(&diagnostics)
+        }
+        OutputArg::Time | OutputArg::Spectrum => {
+            let observer = Observer::new(
+                arguments.distance_kpc * 1000.0 * PARSEC_M,
+                arguments.inclination_deg.to_radians(),
+                arguments.azimuth_deg.to_radians(),
+            )?;
+            let waveform =
+                waveform_from_quadrupole(&source, observer, arguments.difference.into())?;
+            match arguments.output {
+                OutputArg::Time => write_time_domain(&waveform),
+                OutputArg::Spectrum => write_spectrum(
+                    &waveform,
+                    match arguments.window {
+                        WindowArg::Rectangular => Window::Rectangular,
+                        WindowArg::Hann => Window::Hann,
+                        WindowArg::Tukey => Window::Tukey {
+                            alpha: arguments.tukey_alpha,
+                        },
+                    },
+                ),
+                OutputArg::Energy => unreachable!("energy output handled above"),
+            }
+        }
     }
 }
 
@@ -175,6 +187,25 @@ fn write_spectrum(waveform: &Waveform, window: Window) -> Result<(), Box<dyn std
             h_cross.imaginary_s()
         )?;
     }
+    Ok(())
+}
+
+fn write_energy(diagnostics: &EnergyDiagnostics) -> Result<(), Box<dyn std::error::Error>> {
+    let end_time = diagnostics
+        .time_s(diagnostics.power_w().len() - 1)
+        .ok_or("energy diagnostic index is invalid")?;
+    let mut output = BufWriter::new(std::io::stdout().lock());
+    writeln!(
+        output,
+        "start_time_s,end_time_s,total_energy_j,average_power_w"
+    )?;
+    writeln!(
+        output,
+        "{:.16e},{end_time:.16e},{:.16e},{:.16e}",
+        diagnostics.start_time_s(),
+        diagnostics.total_energy_j(),
+        diagnostics.average_power_w()
+    )?;
     Ok(())
 }
 

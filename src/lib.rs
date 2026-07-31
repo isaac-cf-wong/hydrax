@@ -3,12 +3,14 @@
 //! Hydrax currently generates the leading-order gravitational waveform from a
 //! uniformly sampled mass-quadrupole time series. Input values use SI units.
 
+mod energy;
 mod error;
 mod quadrupole;
 mod spectrum;
 mod tensor;
 mod waveform;
 
+pub use energy::{EnergyDiagnostics, ThirdDerivativeStencil, radiated_energy};
 pub use error::WaveformError;
 pub use quadrupole::{FiniteDifference, QuadrupoleSeries, sinusoidal_quadrupole};
 pub use spectrum::{ComplexAmplitude, WaveformSpectrum, Window};
