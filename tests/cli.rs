@@ -24,3 +24,33 @@ fn cli_reports_version() {
         .success()
         .stdout(predicate::str::contains("hydrax 0.1.0"));
 }
+
+#[test]
+fn demo_emits_waveform_csv() {
+    let mut command = Command::cargo_bin("hydrax").expect("binary exists");
+
+    command
+        .args([
+            "demo",
+            "--duration-s",
+            "0.001",
+            "--sample-rate-hz",
+            "10000",
+            "--frequency-hz",
+            "500",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::starts_with("time_s,h_plus,h_cross\n"));
+}
+
+#[test]
+fn demo_rejects_non_positive_distance() {
+    let mut command = Command::cargo_bin("hydrax").expect("binary exists");
+
+    command
+        .args(["demo", "--distance-kpc", "0"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("distance must be positive"));
+}

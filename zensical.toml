@@ -11,6 +11,9 @@ nav = [
   { "API" = [
     { "Overview" = "api/index.md" },
   ] },
+  { "Design" = [
+    { "Quadrupole waveforms" = "design/quadrupole-waveforms.md" },
+  ] },
   { "Contributing" = "contributing.md" },
   { "Security" = "security.md" },
 ]
