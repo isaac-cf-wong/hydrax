@@ -54,3 +54,47 @@ fn demo_rejects_non_positive_distance() {
         .failure()
         .stderr(predicate::str::contains("distance must be positive"));
 }
+
+#[test]
+fn demo_emits_spectrum_csv() {
+    let mut command = Command::cargo_bin("hydrax").expect("binary exists");
+
+    command
+        .args([
+            "demo",
+            "--duration-s",
+            "0.01",
+            "--sample-rate-hz",
+            "10000",
+            "--frequency-hz",
+            "500",
+            "--output",
+            "spectrum",
+            "--window",
+            "rectangular",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::starts_with(
+            "frequency_hz,h_plus_real_s,h_plus_imaginary_s",
+        ));
+}
+
+#[test]
+fn demo_rejects_invalid_tukey_fraction() {
+    let mut command = Command::cargo_bin("hydrax").expect("binary exists");
+
+    command
+        .args([
+            "demo",
+            "--output",
+            "spectrum",
+            "--window",
+            "tukey",
+            "--tukey-alpha",
+            "1.5",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Tukey alpha must be in [0, 1]"));
+}

@@ -105,6 +105,18 @@ impl Waveform {
         (index < self.h_plus.len())
             .then_some(self.start_time_s + index_as_f64(index) * self.sample_interval_s)
     }
+
+    /// Transform both polarizations to nonnegative frequencies.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the selected window has invalid parameters.
+    pub fn spectrum(
+        &self,
+        window: crate::Window,
+    ) -> Result<crate::WaveformSpectrum, WaveformError> {
+        crate::spectrum::spectrum(self, window)
+    }
 }
 
 /// Compute the leading-order gravitational waveform from a mass quadrupole.

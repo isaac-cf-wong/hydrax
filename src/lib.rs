@@ -5,11 +5,13 @@
 
 mod error;
 mod quadrupole;
+mod spectrum;
 mod tensor;
 mod waveform;
 
 pub use error::WaveformError;
 pub use quadrupole::{FiniteDifference, QuadrupoleSeries, sinusoidal_quadrupole};
+pub use spectrum::{ComplexAmplitude, WaveformSpectrum, Window};
 pub use tensor::SymmetricTensor3;
 pub use waveform::{Observer, Waveform, waveform_from_quadrupole};
 

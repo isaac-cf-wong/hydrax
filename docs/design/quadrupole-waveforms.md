@@ -82,6 +82,29 @@ Differentiation amplifies high-frequency noise. Simulation-derived quadrupoles
 will therefore need convergence studies and, eventually, a stress-formula
 implementation that avoids taking two numerical time derivatives.
 
+## Frequency-domain convention
+
+For \(N\) samples separated by \(\Delta t\), Hydrax approximates the continuous
+Fourier transform
+
+\[
+\widetilde h(f_k) = \Delta t\sum_{n=0}^{N-1} w_n h_n
+e^{-2\pi i f_k(t_0+n\Delta t)},
+\qquad f_k=\frac{k}{N\Delta t}.
+\]
+
+The output contains bins \(0\leq k\leq\lfloor N/2\rfloor\). These values are the
+nonnegative half of the two-sided transform: Hydrax does not double interior
+bins. Since strain is dimensionless, each complex Fourier amplitude has units
+of seconds. The absolute start time \(t_0\) is retained as a spectral phase
+factor.
+
+Hydrax provides rectangular, symmetric Hann, and symmetric Tukey windows. The
+transform is the Fourier transform of the windowed data and is not divided by
+the window's coherent gain. That gain is reported separately so amplitude
+corrections can be made explicitly when appropriate. A Tukey taper fraction of
+zero is rectangular, while one is Hann.
+
 ## Verification requirements
 
 The time-domain implementation is accepted only if it demonstrates:
@@ -92,6 +115,10 @@ The time-domain implementation is accepted only if it demonstrates:
 - invariance under addition of an isotropic trace;
 - the advertised finite-difference convergence order; and
 - rejection of non-finite samples and invalid observer distances.
+- exact discrete-transform normalization for DC and bin-centered sinusoids;
+- preservation of magnitude and rotation of phase under a time-origin shift;
+- agreement of Tukey's limiting cases with rectangular and Hann windows; and
+- rejection of invalid window parameters.
 
-Frequency-domain transforms, window functions, radiated-energy estimates, file
-formats, and provenance records are subsequent parts of the first milestone.
+Radiated-energy estimates, file formats, and provenance records are subsequent
+parts of the first milestone.

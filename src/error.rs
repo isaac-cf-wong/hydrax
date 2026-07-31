@@ -29,6 +29,17 @@ pub enum WaveformError {
         /// Number of samples supplied.
         actual: usize,
     },
+    /// A parameter fell outside a closed valid interval.
+    ParameterOutOfRange {
+        /// Parameter name.
+        name: &'static str,
+        /// Rejected value.
+        value: f64,
+        /// Inclusive lower bound.
+        minimum: f64,
+        /// Inclusive upper bound.
+        maximum: f64,
+    },
 }
 
 impl Display for WaveformError {
@@ -46,6 +57,15 @@ impl Display for WaveformError {
             Self::TooFewSamples { required, actual } => write!(
                 formatter,
                 "at least {required} samples are required, got {actual}"
+            ),
+            Self::ParameterOutOfRange {
+                name,
+                value,
+                minimum,
+                maximum,
+            } => write!(
+                formatter,
+                "{name} must be in [{minimum}, {maximum}], got {value}"
             ),
         }
     }
