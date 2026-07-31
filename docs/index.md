@@ -37,5 +37,14 @@ For radiated-energy diagnostics:
 cargo run -- demo --output energy
 ```
 
+To write a versioned JSON provenance sidecar while streaming CSV data:
+
+```shell
+cargo run -- demo --provenance waveform.provenance.json > waveform.csv
+```
+
 See the [quadrupole waveform design](design/quadrupole-waveforms.md) for the
 equations, conventions, and validity limits.
+
+See [output formats and provenance](design/output-formats.md) for the CSV
+schemas and reproducibility record.

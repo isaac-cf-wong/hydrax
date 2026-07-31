@@ -1,12 +1,18 @@
 //! Command-line entry point for Hydrax.
 
-use std::io::{BufWriter, Write};
+mod provenance_record;
+
+use std::{
+    io::{BufWriter, Write},
+    path::PathBuf,
+};
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use hydrax::{
     EnergyDiagnostics, FiniteDifference, Observer, PARSEC_M, ThirdDerivativeStencil, Waveform,
     Window, radiated_energy, sinusoidal_quadrupole, waveform_from_quadrupole,
 };
+use serde::Serialize;
 
 /// Core-collapse supernova gravitational-wave simulation tools.
 #[derive(Debug, Parser)]
@@ -22,7 +28,7 @@ enum Command {
     Demo(DemoArgs),
 }
 
-#[derive(Debug, Args)]
+#[derive(Debug, Args, Serialize)]
 struct DemoArgs {
     /// Source duration in seconds.
     #[arg(long, default_value_t = 0.02)]
@@ -48,7 +54,7 @@ struct DemoArgs {
     /// Centered finite-difference stencil.
     #[arg(long, value_enum, default_value_t = DifferenceArg::FivePoint)]
     difference: DifferenceArg,
-    /// Select time-domain or frequency-domain CSV output.
+    /// Select time-domain, frequency-domain, or energy-summary CSV output.
     #[arg(long, value_enum, default_value_t = OutputArg::Time)]
     output: OutputArg,
     /// Window used for frequency-domain output.
@@ -57,22 +63,38 @@ struct DemoArgs {
     /// Taper fraction when `--window tukey` is selected.
     #[arg(long, default_value_t = 0.5)]
     tukey_alpha: f64,
+    /// Write a versioned JSON provenance sidecar to this path.
+    #[arg(long, value_name = "PATH")]
+    provenance: Option<PathBuf>,
 }
 
-#[derive(Debug, Clone, Copy, ValueEnum)]
+#[derive(Debug, Clone, Copy, Serialize, ValueEnum)]
+#[serde(rename_all = "kebab-case")]
 enum DifferenceArg {
     ThreePoint,
     FivePoint,
 }
 
-#[derive(Debug, Clone, Copy, ValueEnum)]
+#[derive(Debug, Clone, Copy, Serialize, ValueEnum)]
+#[serde(rename_all = "kebab-case")]
 enum OutputArg {
     Time,
     Spectrum,
     Energy,
 }
 
-#[derive(Debug, Clone, Copy, ValueEnum)]
+impl OutputArg {
+    const fn schema(self) -> &'static str {
+        match self {
+            Self::Time => "hydrax.waveform.time.csv.v1",
+            Self::Spectrum => "hydrax.waveform.spectrum.csv.v1",
+            Self::Energy => "hydrax.waveform.energy.csv.v1",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, ValueEnum)]
+#[serde(rename_all = "kebab-case")]
 enum WindowArg {
     Rectangular,
     Hann,
@@ -129,7 +151,7 @@ fn write_demo(arguments: &DemoArgs) -> Result<(), Box<dyn std::error::Error>> {
     match arguments.output {
         OutputArg::Energy => {
             let diagnostics = radiated_energy(&source, ThirdDerivativeStencil::SevenPoint)?;
-            write_energy(&diagnostics)
+            write_energy(&diagnostics)?;
         }
         OutputArg::Time | OutputArg::Spectrum => {
             let observer = Observer::new(
@@ -140,7 +162,7 @@ fn write_demo(arguments: &DemoArgs) -> Result<(), Box<dyn std::error::Error>> {
             let waveform =
                 waveform_from_quadrupole(&source, observer, arguments.difference.into())?;
             match arguments.output {
-                OutputArg::Time => write_time_domain(&waveform),
+                OutputArg::Time => write_time_domain(&waveform)?,
                 OutputArg::Spectrum => write_spectrum(
                     &waveform,
                     match arguments.window {
@@ -150,11 +172,15 @@ fn write_demo(arguments: &DemoArgs) -> Result<(), Box<dyn std::error::Error>> {
                             alpha: arguments.tukey_alpha,
                         },
                     },
-                ),
+                )?,
                 OutputArg::Energy => unreachable!("energy output handled above"),
             }
         }
     }
+    if let Some(path) = &arguments.provenance {
+        provenance_record::write(path, arguments, arguments.output.schema())?;
+    }
+    Ok(())
 }
 
 fn write_time_domain(waveform: &Waveform) -> Result<(), Box<dyn std::error::Error>> {
