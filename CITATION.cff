@@ -1,5 +1,5 @@
 cff-version: 1.2.0
-title: "rust-package-template: A GitHub template repository for a Rust package"
+title: "Hydrax: Core-collapse supernova gravitational-wave simulation tools"
 license: "BSD-3-Clause"
 type: software
 authors:
@@ -9,5 +9,7 @@ authors:
       orcid: "https://orcid.org/0000-0003-2166-0027"
 keywords:
     - rust
-    - github
-    - template
+    - astrophysics
+    - gravitational waves
+    - core-collapse supernovae
+repository-code: "https://github.com/isaac-cf-wong/hydrax"
