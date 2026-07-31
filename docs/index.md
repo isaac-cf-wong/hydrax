@@ -8,7 +8,8 @@ verified collapse hydrodynamics to relativistic multidimensional models. Rust
 will provide the safe public API and orchestration, with optional portable C
 kernels for performance-critical calculations.
 
-Hydrax does not yet provide a scientific simulation API.
+The first time-domain quadrupole waveform API is available for verification.
+It is not yet a complete CCSN simulation.
 
 ## Local Checks
 
@@ -18,8 +19,11 @@ cargo clippy --all-targets --all-features -- -D warnings
 cargo test --all-features
 ```
 
-## Current command
+## Demonstration
 
 ```shell
-cargo run -- --help
+cargo run -- demo > waveform.csv
 ```
+
+See the [quadrupole waveform design](design/quadrupole-waveforms.md) for the
+equations, conventions, and validity limits.

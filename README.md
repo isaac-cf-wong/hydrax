@@ -16,15 +16,17 @@ I/O. Performance-critical numerical kernels may be implemented in portable C
 behind a small, versioned interface.
 
 > [!IMPORTANT]
-> Hydrax is in early development and does not yet provide a scientific
-> simulation API. No published results should currently be based on it.
+> Hydrax is in early development. Its quadrupole waveform API is intended for
+> verification and is not yet a complete CCSN simulation. No published results
+> should currently be based on it.
 
 ## Planned first milestone
 
-The first scientific release will generate observer-dependent gravitational
-wave polarizations from a prescribed mass-quadrupole time series. It will be
-verified against analytic sources, symmetry constraints, distance scaling, and
-convergence tests before collapse hydrodynamics is introduced.
+The first scientific milestone generates observer-dependent gravitational-wave
+polarizations from a prescribed mass-quadrupole time series. The time-domain
+foundation is implemented with second- and fourth-order centered finite
+differences and is verified against analytic sources, symmetry constraints,
+distance scaling, and convergence tests.
 
 Later milestones will add spherical hydrodynamics, relativistic collapse and
 bounce, axisymmetric rotation, realistic equations of state, and neutrino
@@ -43,11 +45,40 @@ cargo test --all-features
 cargo doc --no-deps --all-features
 ```
 
-The placeholder command currently exposes package help and version information:
+Generate a demonstration waveform as CSV:
 
 ```shell
-cargo run -- --help
+cargo run -- demo > waveform.csv
 ```
+
+The public library API accepts SI units explicitly:
+
+```rust
+use hydrax::{
+    FiniteDifference, Observer, PARSEC_M, sinusoidal_quadrupole,
+    waveform_from_quadrupole,
+};
+
+let source = sinusoidal_quadrupole(
+    1.0e38,
+    2.0 * std::f64::consts::PI * 800.0,
+    0.0,
+    1.0 / 16_384.0,
+    1024,
+)?;
+let observer = Observer::new(10_000.0 * PARSEC_M, 0.0, 0.0)?;
+let waveform = waveform_from_quadrupole(
+    &source,
+    observer,
+    FiniteDifference::FivePoint,
+)?;
+
+assert_eq!(waveform.h_plus().len(), 1020);
+# Ok::<(), hydrax::WaveformError>(())
+```
+
+The conventions and validity limits are documented in the
+[quadrupole waveform design](docs/design/quadrupole-waveforms.md).
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the complete development workflow.
 
