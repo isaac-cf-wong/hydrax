@@ -158,5 +158,5 @@ The time-domain implementation is accepted only if it demonstrates:
 - trace invariance and zero energy for spherical motion; and
 - the advertised third-derivative convergence order.
 
-File formats and provenance records are subsequent parts of the first
-milestone.
+The versioned file schemas and provenance record are specified in
+[output formats and provenance](output-formats.md).

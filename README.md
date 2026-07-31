@@ -27,7 +27,9 @@ polarizations from a prescribed mass-quadrupole time series. The time- and
 frequency-domain foundation now includes second- and fourth-order centered
 finite differences, explicit Fourier normalization, and configurable window
 functions. It is verified against analytic sources, symmetry constraints,
-distance scaling, convergence tests, and exact discrete spectra.
+distance scaling, convergence tests, exact discrete spectra, and analytic
+radiated-energy calculations. Versioned CSV schemas and JSON provenance
+sidecars make demonstration runs machine-readable and auditable.
 
 Later milestones will add spherical hydrodynamics, relativistic collapse and
 bounce, axisymmetric rotation, realistic equations of state, and neutrino
@@ -64,6 +66,17 @@ Estimate the quadrupole luminosity and total radiated energy:
 cargo run -- demo --output energy
 ```
 
+Record the complete runtime configuration and build provenance alongside any
+of these CSV outputs:
+
+```shell
+cargo run -- demo --provenance waveform.provenance.json > waveform.csv
+```
+
+The sidecar includes its schema version, the CSV schema identifier, the Hydrax
+version and source revision, compiler and target information, enabled features,
+resolved dependency versions, floating-point precision, and every demo option.
+
 The public library API accepts SI units explicitly:
 
 ```rust
@@ -98,7 +111,9 @@ assert!(energy.total_energy_j() > 0.0);
 ```
 
 The conventions and validity limits are documented in the
-[quadrupole waveform design](docs/design/quadrupole-waveforms.md).
+[quadrupole waveform design](docs/design/quadrupole-waveforms.md). The stable
+column definitions and provenance fields are documented in
+[output formats and provenance](docs/design/output-formats.md).
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the complete development workflow.
 
