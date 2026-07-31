@@ -31,5 +31,11 @@ For frequency-domain output:
 cargo run -- demo --output spectrum --window hann > spectrum.csv
 ```
 
+For radiated-energy diagnostics:
+
+```shell
+cargo run -- demo --output energy
+```
+
 See the [quadrupole waveform design](design/quadrupole-waveforms.md) for the
 equations, conventions, and validity limits.

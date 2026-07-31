@@ -98,3 +98,16 @@ fn demo_rejects_invalid_tukey_fraction() {
         .failure()
         .stderr(predicate::str::contains("Tukey alpha must be in [0, 1]"));
 }
+
+#[test]
+fn demo_emits_energy_csv() {
+    let mut command = Command::cargo_bin("hydrax").expect("binary exists");
+
+    command
+        .args(["demo", "--output", "energy"])
+        .assert()
+        .success()
+        .stdout(predicate::str::starts_with(
+            "start_time_s,end_time_s,total_energy_j,average_power_w",
+        ));
+}
