@@ -196,34 +196,59 @@ fn classify(path: &Path, build_output: Option<&Path>) -> Disposition {
 
 /// Files Cargo writes into the root of a build output directory.
 ///
-/// `CACHEDIR.TAG` is written only when Cargo creates the directory itself, so
-/// it is missing whenever the directory already existed. `.rustc_info.json` is
-/// written on every build, which covers that case.
+/// Neither is guaranteed. `CACHEDIR.TAG` is written only when Cargo creates the
+/// directory itself, so it is missing whenever the directory already existed,
+/// and `.rustc_info.json` is suppressed by `CARGO_CACHE_RUSTC_INFO=0`. When
+/// both are absent the layout is used instead, see [`layout_output_dir`].
 const BUILD_OUTPUT_MARKERS: [&str; 2] = ["CACHEDIR.TAG", ".rustc_info.json"];
 
 /// Return the directory Cargo is writing build output into.
 ///
 /// `CARGO_TARGET_DIR` is not forwarded to build scripts, but `OUT_DIR` always
-/// sits inside the output directory, and Cargo marks that directory's root.
-/// The outermost marked ancestor is taken so that a `--target <triple>`
-/// subdirectory does not stand in for the real root.
+/// sits inside the output directory. A marker file identifies its root when one
+/// exists; otherwise the root is derived from the fixed layout below `OUT_DIR`.
 fn build_output_dir(root: &Path) -> Option<PathBuf> {
     let out_dir = PathBuf::from(env::var_os("OUT_DIR")?);
     let out_dir = fs::canonicalize(&out_dir).unwrap_or(out_dir);
     let canonical_root = fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
-    out_dir
+    // A candidate at or above the workspace root would exclude the sources
+    // themselves, which is worse than excluding nothing.
+    let is_below_root = |candidate: &Path| !canonical_root.starts_with(candidate);
+
+    let marked = out_dir
         .ancestors()
-        // A marker at or above the workspace root would exclude the sources
-        // themselves, which is worse than excluding nothing.
-        .filter(|ancestor| !canonical_root.starts_with(ancestor))
+        .filter(|ancestor| is_below_root(ancestor))
         .filter(|ancestor| {
             BUILD_OUTPUT_MARKERS
                 .iter()
                 .any(|marker| ancestor.join(marker).is_file())
         })
-        // `Ancestors` runs innermost-first and is not double-ended.
+        // The outermost marked ancestor, so that a `--target <triple>`
+        // subdirectory does not stand in for the real root. `Ancestors` runs
+        // innermost-first and is not double-ended.
         .last()
-        .map(Path::to_path_buf)
+        .map(Path::to_path_buf);
+    marked.or_else(|| layout_output_dir(&out_dir).filter(|candidate| is_below_root(candidate)))
+}
+
+/// Derive the build output root from the shape of `OUT_DIR`.
+///
+/// Cargo lays out `<root>/[<triple>/]<profile>/build/<package>-<hash>/out`, so
+/// the innermost `build` component locates the rest. This is the fallback for
+/// an output directory carrying no marker file at all.
+fn layout_output_dir(out_dir: &Path) -> Option<PathBuf> {
+    let build = out_dir
+        .ancestors()
+        .find(|ancestor| ancestor.file_name().is_some_and(|name| name == "build"))?;
+    let candidate = build.parent()?.parent()?;
+    // Only a cross-compiled build inserts the target triple, and then the
+    // directory is named after it.
+    if let Some(triple) = env::var_os("TARGET")
+        && candidate.file_name() == Some(triple.as_os_str())
+    {
+        return candidate.parent().map(Path::to_path_buf);
+    }
+    Some(candidate.to_path_buf())
 }
 
 /// Return a Git exclude pathspec for a build output directory inside `root`.
