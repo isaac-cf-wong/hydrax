@@ -31,9 +31,13 @@ jobs:
               uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
 
             - name: Verify workspace versions match tag
+              # The tag is passed through the environment rather than expanded
+              # into the shell source, so a crafted dispatch input cannot
+              # inject commands.
+              env:
+                  TAG_NAME: ${{ inputs.tag_name }}
               run: |
-                  EXPECTED_VERSION="${{ inputs.tag_name }}"
-                  EXPECTED_VERSION="${EXPECTED_VERSION#v}"
+                  EXPECTED_VERSION="${TAG_NAME#v}"
                   cargo metadata --no-deps --format-version 1 > metadata.json
                   MISMATCHED=$(
                     jq -r --arg expected "$EXPECTED_VERSION" \
@@ -77,9 +81,13 @@ jobs:
               uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
 
             - name: Verify workspace versions match tag
+              # The tag is passed through the environment rather than expanded
+              # into the shell source, so a crafted dispatch input cannot
+              # inject commands.
+              env:
+                  TAG_NAME: ${{ inputs.tag_name }}
               run: |
-                  EXPECTED_VERSION="${{ inputs.tag_name }}"
-                  EXPECTED_VERSION="${EXPECTED_VERSION#v}"
+                  EXPECTED_VERSION="${TAG_NAME#v}"
                   cargo metadata --no-deps --format-version 1 > metadata.json
                   MISMATCHED=$(
                     jq -r --arg expected "$EXPECTED_VERSION" \

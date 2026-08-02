@@ -9,6 +9,11 @@ mod quadrupole;
 mod spectrum;
 mod waveform;
 
+// `QuadrupoleSeries::new` takes `SymmetricTensor3` values and every fallible
+// constructor returns `WaveformError`, so this crate's own API is unusable
+// without them.
+pub use hydrax_core::{SymmetricTensor3, WaveformError};
+
 pub use energy::{EnergyDiagnostics, ThirdDerivativeStencil, radiated_energy};
 pub use quadrupole::{FiniteDifference, QuadrupoleSeries, sinusoidal_quadrupole};
 pub use spectrum::{ComplexAmplitude, WaveformSpectrum, Window};

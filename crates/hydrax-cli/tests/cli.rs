@@ -4,9 +4,14 @@ use assert_cmd::Command;
 use predicates::prelude::predicate;
 use serde_json::Value;
 
+/// Build a command for the `hydrax` binary under test.
+fn hydrax_command() -> Command {
+    Command::cargo_bin("hydrax").expect("binary exists")
+}
+
 #[test]
 fn cli_reports_package_name_in_help() {
-    let mut command = Command::cargo_bin("hydrax").expect("binary exists");
+    let mut command = hydrax_command();
 
     command
         .arg("--help")
@@ -17,18 +22,21 @@ fn cli_reports_package_name_in_help() {
 
 #[test]
 fn cli_reports_version() {
-    let mut command = Command::cargo_bin("hydrax").expect("binary exists");
+    let mut command = hydrax_command();
 
     command
         .arg("--version")
         .assert()
         .success()
-        .stdout(predicate::str::contains("hydrax 0.1.0"));
+        .stdout(predicate::str::contains(format!(
+            "hydrax {}",
+            env!("CARGO_PKG_VERSION")
+        )));
 }
 
 #[test]
 fn demo_emits_waveform_csv() {
-    let mut command = Command::cargo_bin("hydrax").expect("binary exists");
+    let mut command = hydrax_command();
 
     command
         .args([
@@ -47,7 +55,7 @@ fn demo_emits_waveform_csv() {
 
 #[test]
 fn demo_rejects_non_positive_distance() {
-    let mut command = Command::cargo_bin("hydrax").expect("binary exists");
+    let mut command = hydrax_command();
 
     command
         .args(["demo", "--distance-kpc", "0"])
@@ -58,7 +66,7 @@ fn demo_rejects_non_positive_distance() {
 
 #[test]
 fn demo_emits_spectrum_csv() {
-    let mut command = Command::cargo_bin("hydrax").expect("binary exists");
+    let mut command = hydrax_command();
 
     command
         .args([
@@ -83,7 +91,7 @@ fn demo_emits_spectrum_csv() {
 
 #[test]
 fn demo_rejects_invalid_tukey_fraction() {
-    let mut command = Command::cargo_bin("hydrax").expect("binary exists");
+    let mut command = hydrax_command();
 
     command
         .args([
@@ -102,7 +110,7 @@ fn demo_rejects_invalid_tukey_fraction() {
 
 #[test]
 fn demo_rejects_non_finite_inactive_tukey_fraction() {
-    let mut command = Command::cargo_bin("hydrax").expect("binary exists");
+    let mut command = hydrax_command();
 
     command
         .args(["demo", "--output", "time", "--tukey-alpha", "NaN"])
@@ -113,7 +121,7 @@ fn demo_rejects_non_finite_inactive_tukey_fraction() {
 
 #[test]
 fn demo_rejects_non_finite_inactive_distance() {
-    let mut command = Command::cargo_bin("hydrax").expect("binary exists");
+    let mut command = hydrax_command();
 
     command
         .args(["demo", "--output", "energy", "--distance-kpc", "NaN"])
@@ -124,7 +132,7 @@ fn demo_rejects_non_finite_inactive_distance() {
 
 #[test]
 fn demo_emits_energy_csv() {
-    let mut command = Command::cargo_bin("hydrax").expect("binary exists");
+    let mut command = hydrax_command();
 
     command
         .args(["demo", "--output", "energy"])
@@ -146,7 +154,7 @@ fn demo_writes_versioned_provenance() {
         std::process::id(),
         unique
     ));
-    let mut command = Command::cargo_bin("hydrax").expect("binary exists");
+    let mut command = hydrax_command();
 
     command
         .args([
