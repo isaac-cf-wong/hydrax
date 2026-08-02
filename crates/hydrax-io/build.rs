@@ -86,12 +86,12 @@ fn is_hydrax_workspace(directory: &Path) -> bool {
         && directory.join("crates/hydrax-core/Cargo.toml").is_file()
 }
 
-/// Directories at the workspace root that must never be watched.
+/// Entries at the workspace root that must never be watched.
 ///
-/// `target` is written by the build itself, and `.git` is watched precisely by
-/// [`watch_git`] instead of wholesale; both would otherwise cause the build
-/// script to rerun on every invocation.
-const UNWATCHED_ROOT_ENTRIES: [&str; 3] = ["target", ".git", ".codegraph"];
+/// `.git` is watched precisely by [`watch_git`] instead of wholesale, and
+/// `.codegraph` is a local tool cache. The build output directory is excluded
+/// separately by [`is_build_output`], because it is not always called `target`.
+const UNWATCHED_ROOT_ENTRIES: [&str; 2] = [".git", ".codegraph"];
 
 /// Watch every workspace file that can change the recorded revision or state.
 ///
@@ -99,8 +99,13 @@ const UNWATCHED_ROOT_ENTRIES: [&str; 3] = ["target", ".git", ".codegraph"];
 /// watch set has to be the whole workspace too. Watching only each crate's
 /// sources would leave `README.md`, `docs/`, workflow files, and future C
 /// sources outside `src/` able to dirty the tree without invalidating this
-/// script. Cargo walks watched directories recursively, so new files inside
-/// them are covered as well.
+/// script. Cargo walks watched directories recursively, so files created inside
+/// a watched directory are covered as well.
+///
+/// One gap remains by construction: an entry created at the workspace root
+/// itself after a build is not watched, because the root directory cannot be
+/// watched without pulling in the build output. Closing it would mean rerunning
+/// this script on every build, which costs a relink of every dependent crate.
 fn watch_workspace(root: &Path) {
     let Ok(entries) = fs::read_dir(root) else {
         // Fall back to the crate's own sources rather than silently watching
@@ -109,6 +114,7 @@ fn watch_workspace(root: &Path) {
         println!("cargo:rerun-if-changed=src");
         return;
     };
+    let build_output = build_output_dir();
     for entry in entries.flatten() {
         let name = entry.file_name();
         if UNWATCHED_ROOT_ENTRIES
@@ -117,8 +123,55 @@ fn watch_workspace(root: &Path) {
         {
             continue;
         }
-        println!("cargo:rerun-if-changed={}", entry.path().display());
+        let path = entry.path();
+        if is_build_output(&path, build_output.as_deref()) {
+            continue;
+        }
+        println!("cargo:rerun-if-changed={}", path.display());
     }
+}
+
+/// Return the directory Cargo is writing build output into.
+///
+/// `CARGO_TARGET_DIR` is not forwarded to build scripts, but `OUT_DIR` always
+/// sits inside the output directory, so it identifies the tree to leave alone
+/// whatever the user named it.
+fn build_output_dir() -> Option<PathBuf> {
+    let out_dir = PathBuf::from(env::var_os("OUT_DIR")?);
+    Some(fs::canonicalize(&out_dir).unwrap_or(out_dir))
+}
+
+/// Return a Git exclude pathspec for a build output directory inside `root`.
+///
+/// Returns `None` when the output directory is outside the repository, which
+/// is the default arrangement only when `CARGO_TARGET_DIR` points elsewhere;
+/// the conventional in-tree `target/` is already ignored by `.gitignore`.
+fn build_output_pathspec(root: &Path) -> Option<String> {
+    let build_output = build_output_dir()?;
+    let canonical_root = fs::canonicalize(root).ok()?;
+    let relative = build_output.strip_prefix(&canonical_root).ok()?;
+    // The first component is the entry at the workspace root; excluding the
+    // whole entry keeps the pathspec stable across profiles and targets.
+    let top_level = relative.components().next()?.as_os_str().to_str()?;
+    Some(format!(":!{top_level}"))
+}
+
+/// Report whether a path contains Cargo's build output.
+///
+/// Watching the output directory would make the build dirty itself: the script
+/// writes into it, so every no-op build would rerun the script. A custom
+/// in-workspace `CARGO_TARGET_DIR` also shows up as an untracked directory, so
+/// watching it would additionally report the workspace as `modified`.
+fn is_build_output(path: &Path, build_output: Option<&Path>) -> bool {
+    if path.file_name().is_some_and(|name| name == "target") {
+        // The conventional name, used when OUT_DIR is unavailable.
+        return true;
+    }
+    let Some(build_output) = build_output else {
+        return false;
+    };
+    let canonical = fs::canonicalize(path);
+    build_output.starts_with(canonical.as_deref().unwrap_or(path))
 }
 
 /// Return the workspace root when it is itself the root of a Git repository.
@@ -167,11 +220,25 @@ fn source_revision(repository: Option<&Path>) -> String {
 }
 
 /// Report whether the working tree matched its revision at build time.
+///
+/// A build output directory inside the repository is excluded: it is written
+/// by this very build, and reporting the workspace as `modified` because Cargo
+/// created its own output would describe the build rather than the source.
 fn source_state(repository: Option<&Path>) -> String {
     if let Some(root) = repository {
+        let mut arguments = vec![
+            "status".to_owned(),
+            "--porcelain".to_owned(),
+            "--untracked-files=normal".to_owned(),
+        ];
+        if let Some(excluded) = build_output_pathspec(root) {
+            arguments.push("--".to_owned());
+            arguments.push(".".to_owned());
+            arguments.push(excluded);
+        }
         return match Command::new("git")
             .current_dir(root)
-            .args(["status", "--porcelain", "--untracked-files=normal"])
+            .args(&arguments)
             .output()
         {
             Ok(output) if output.status.success() && output.stdout.is_empty() => "clean".to_owned(),
@@ -206,8 +273,11 @@ fn packaged_revision() -> Option<String> {
 }
 
 /// Report whether a string is a full hexadecimal Git object name.
+///
+/// Cargo still calls the field `sha1`, but it serializes the repository's
+/// actual object ID, which is 64 characters in a SHA-256 repository.
 fn is_object_name(value: &str) -> bool {
-    value.len() == 40 && value.chars().all(|character| character.is_ascii_hexdigit())
+    matches!(value.len(), 40 | 64) && value.chars().all(|character| character.is_ascii_hexdigit())
 }
 
 /// Run a Git command in a repository and return its trimmed output.
