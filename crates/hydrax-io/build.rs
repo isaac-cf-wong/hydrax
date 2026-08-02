@@ -90,7 +90,8 @@ fn is_hydrax_workspace(directory: &Path) -> bool {
 ///
 /// `.git` is watched precisely by [`watch_git`] instead of wholesale, and
 /// `.codegraph` is a local tool cache. The build output directory is excluded
-/// separately by [`is_build_output`], because it is not always called `target`.
+/// separately by [`classify`], because it is not always called `target` and is
+/// not always at the workspace root.
 const UNWATCHED_ROOT_ENTRIES: [&str; 2] = [".git", ".codegraph"];
 
 /// Watch every workspace file that can change the recorded revision or state.
@@ -107,71 +108,116 @@ const UNWATCHED_ROOT_ENTRIES: [&str; 2] = [".git", ".codegraph"];
 /// watched without pulling in the build output. Closing it would mean rerunning
 /// this script on every build, which costs a relink of every dependent crate.
 fn watch_workspace(root: &Path) {
-    let Ok(entries) = fs::read_dir(root) else {
+    if fs::read_dir(root).is_err() {
         // Fall back to the crate's own sources rather than silently watching
         // nothing.
         println!("cargo:rerun-if-changed=Cargo.toml");
         println!("cargo:rerun-if-changed=src");
         return;
+    }
+    watch_directory(root, build_output_dir().as_deref(), true);
+}
+
+/// Watch every entry of `directory` except Cargo's build output.
+///
+/// When the output directory sits inside a source directory — a nested
+/// `CARGO_TARGET_DIR` such as `crates/hydrax-io/target` — that ancestor cannot
+/// simply be skipped, or every crate beneath it would go unwatched. It is
+/// descended into instead, so each sibling of the output directory is watched
+/// individually and only the output subtree itself is left out.
+fn watch_directory(directory: &Path, build_output: Option<&Path>, is_root: bool) {
+    let Ok(entries) = fs::read_dir(directory) else {
+        return;
     };
-    let build_output = build_output_dir();
     for entry in entries.flatten() {
         let name = entry.file_name();
-        if UNWATCHED_ROOT_ENTRIES
-            .iter()
-            .any(|unwatched| name == *unwatched)
+        if is_root
+            && UNWATCHED_ROOT_ENTRIES
+                .iter()
+                .any(|unwatched| name == *unwatched)
         {
             continue;
         }
         let path = entry.path();
-        if is_build_output(&path, build_output.as_deref()) {
-            continue;
+        match classify(&path, build_output) {
+            Disposition::Skip => {}
+            Disposition::Descend => watch_directory(&path, build_output, false),
+            Disposition::Watch => println!("cargo:rerun-if-changed={}", path.display()),
         }
-        println!("cargo:rerun-if-changed={}", path.display());
     }
+}
+
+/// What [`watch_directory`] should do with one entry.
+enum Disposition {
+    /// The entry is Cargo's build output.
+    Skip,
+    /// The entry contains Cargo's build output somewhere beneath it.
+    Descend,
+    /// The entry is ordinary source.
+    Watch,
+}
+
+/// Decide how an entry relates to Cargo's build output.
+///
+/// Watching the output directory would make the build dirty itself: the script
+/// writes into it, so every no-op build would rerun the script.
+fn classify(path: &Path, build_output: Option<&Path>) -> Disposition {
+    let Some(build_output) = build_output else {
+        // Without `OUT_DIR`, fall back to the conventional name.
+        if path.file_name().is_some_and(|name| name == "target") {
+            return Disposition::Skip;
+        }
+        return Disposition::Watch;
+    };
+    let canonical = fs::canonicalize(path);
+    let path = canonical.as_deref().unwrap_or(path);
+    if build_output == path {
+        return Disposition::Skip;
+    }
+    if build_output.starts_with(path) {
+        return Disposition::Descend;
+    }
+    Disposition::Watch
 }
 
 /// Return the directory Cargo is writing build output into.
 ///
 /// `CARGO_TARGET_DIR` is not forwarded to build scripts, but `OUT_DIR` always
-/// sits inside the output directory, so it identifies the tree to leave alone
-/// whatever the user named it.
+/// sits inside the output directory. Cargo marks that directory with a
+/// `CACHEDIR.TAG` file, which identifies it whatever the user named it and
+/// wherever it was placed.
 fn build_output_dir() -> Option<PathBuf> {
     let out_dir = PathBuf::from(env::var_os("OUT_DIR")?);
-    Some(fs::canonicalize(&out_dir).unwrap_or(out_dir))
+    let out_dir = fs::canonicalize(&out_dir).unwrap_or(out_dir);
+    out_dir
+        .ancestors()
+        .find(|ancestor| ancestor.join("CACHEDIR.TAG").is_file())
+        .map(Path::to_path_buf)
 }
 
 /// Return a Git exclude pathspec for a build output directory inside `root`.
 ///
-/// Returns `None` when the output directory is outside the repository, which
-/// is the default arrangement only when `CARGO_TARGET_DIR` points elsewhere;
-/// the conventional in-tree `target/` is already ignored by `.gitignore`.
+/// Returns `None` when the output directory is outside the repository. The
+/// conventional in-tree `target/` is already ignored by `.gitignore`; this
+/// matters for a custom `CARGO_TARGET_DIR` placed inside the workspace.
 fn build_output_pathspec(root: &Path) -> Option<String> {
     let build_output = build_output_dir()?;
     let canonical_root = fs::canonicalize(root).ok()?;
     let relative = build_output.strip_prefix(&canonical_root).ok()?;
-    // The first component is the entry at the workspace root; excluding the
-    // whole entry keeps the pathspec stable across profiles and targets.
-    let top_level = relative.components().next()?.as_os_str().to_str()?;
-    Some(format!(":!{top_level}"))
-}
-
-/// Report whether a path contains Cargo's build output.
-///
-/// Watching the output directory would make the build dirty itself: the script
-/// writes into it, so every no-op build would rerun the script. A custom
-/// in-workspace `CARGO_TARGET_DIR` also shows up as an untracked directory, so
-/// watching it would additionally report the workspace as `modified`.
-fn is_build_output(path: &Path, build_output: Option<&Path>) -> bool {
-    if path.file_name().is_some_and(|name| name == "target") {
-        // The conventional name, used when OUT_DIR is unavailable.
-        return true;
+    let mut path = String::new();
+    for component in relative.components() {
+        if !path.is_empty() {
+            path.push('/');
+        }
+        path.push_str(component.as_os_str().to_str()?);
     }
-    let Some(build_output) = build_output else {
-        return false;
-    };
-    let canonical = fs::canonicalize(path);
-    build_output.starts_with(canonical.as_deref().unwrap_or(path))
+    if path.is_empty() {
+        return None;
+    }
+    // `literal` disables wildcard interpretation of a directory name Cargo's
+    // user chose, and `top` anchors it to the repository root rather than to
+    // any same-named directory deeper in the tree.
+    Some(format!(":(exclude,literal,top){path}"))
 }
 
 /// Return the workspace root when it is itself the root of a Git repository.
