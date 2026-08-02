@@ -19,16 +19,15 @@ fn main() {
     println!("cargo:rerun-if-changed=build.rs");
 
     let workspace = hydrax_workspace_root();
+    let repository = workspace.as_deref().and_then(git_repository);
     if let Some(root) = workspace.as_deref() {
-        watch_workspace(root);
+        watch_workspace(root, repository.as_deref());
     } else {
         // Packaged or vendored sources: the crate's own files are all that can
         // be observed.
         println!("cargo:rerun-if-changed=Cargo.toml");
         println!("cargo:rerun-if-changed=src");
     }
-
-    let repository = workspace.as_deref().and_then(git_repository);
     if let Some(root) = &repository {
         watch_git(root);
     }
@@ -108,7 +107,7 @@ const UNWATCHED_ROOT_ENTRIES: [&str; 2] = [".git", ".codegraph"];
 /// itself after a build is not watched, because the root directory cannot be
 /// watched without pulling in the build output. Closing it would mean rerunning
 /// this script on every build, which costs a relink of every dependent crate.
-fn watch_workspace(root: &Path) {
+fn watch_workspace(root: &Path, repository: Option<&Path>) {
     if fs::read_dir(root).is_err() {
         // Fall back to the crate's own sources rather than silently watching
         // nothing.
@@ -117,7 +116,8 @@ fn watch_workspace(root: &Path) {
         return;
     }
     let mut visited = HashSet::new();
-    watch_directory(root, build_output_dir(root).as_deref(), true, &mut visited);
+    let build_output = build_output_dir(root, repository);
+    watch_directory(root, build_output.as_deref(), true, &mut visited);
 }
 
 /// Watch every entry of `directory` except Cargo's build output.
@@ -207,17 +207,23 @@ const BUILD_OUTPUT_MARKERS: [&str; 2] = ["CACHEDIR.TAG", ".rustc_info.json"];
 /// `CARGO_TARGET_DIR` is not forwarded to build scripts, but `OUT_DIR` always
 /// sits inside the output directory. A marker file identifies its root when one
 /// exists; otherwise the root is derived from the fixed layout below `OUT_DIR`.
-fn build_output_dir(root: &Path) -> Option<PathBuf> {
+fn build_output_dir(root: &Path, repository: Option<&Path>) -> Option<PathBuf> {
     let out_dir = PathBuf::from(env::var_os("OUT_DIR")?);
     let out_dir = fs::canonicalize(&out_dir).unwrap_or(out_dir);
     let canonical_root = fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
     // A candidate at or above the workspace root would exclude the sources
-    // themselves, which is worse than excluding nothing.
+    // themselves, which is worse than excluding nothing. The same is true of
+    // any candidate holding tracked files: excluding one hides real edits and
+    // reports a clean tree that is not clean. Excluding nothing only costs
+    // rebuilds.
     let is_below_root = |candidate: &Path| !canonical_root.starts_with(candidate);
+    let holds_no_source =
+        |candidate: &Path| !repository.is_some_and(|repo| tracks_any_file(repo, candidate));
+    let is_usable = |candidate: &&Path| is_below_root(candidate) && holds_no_source(candidate);
 
     let marked = out_dir
         .ancestors()
-        .filter(|ancestor| is_below_root(ancestor))
+        .filter(is_usable)
         .filter(|ancestor| {
             BUILD_OUTPUT_MARKERS
                 .iter()
@@ -228,7 +234,18 @@ fn build_output_dir(root: &Path) -> Option<PathBuf> {
         // innermost-first and is not double-ended.
         .last()
         .map(Path::to_path_buf);
-    marked.or_else(|| layout_output_dir(&out_dir).filter(|candidate| is_below_root(candidate)))
+    marked
+        .or_else(|| layout_output_dir(&out_dir).filter(|candidate| is_usable(&candidate.as_path())))
+}
+
+/// Report whether Git tracks any file inside `candidate`.
+///
+/// A path outside the repository makes `ls-files` fail, which counts as
+/// untracked: an output directory elsewhere on disk is safe to exclude.
+fn tracks_any_file(repository: &Path, candidate: &Path) -> bool {
+    candidate
+        .to_str()
+        .is_some_and(|path| git_output(repository, &["ls-files", "--", path]).is_some())
 }
 
 /// Derive the build output root from the shape of `OUT_DIR`.
@@ -257,7 +274,9 @@ fn layout_output_dir(out_dir: &Path) -> Option<PathBuf> {
 /// conventional in-tree `target/` is already ignored by `.gitignore`; this
 /// matters for a custom `CARGO_TARGET_DIR` placed inside the workspace.
 fn build_output_pathspec(root: &Path) -> Option<String> {
-    let build_output = build_output_dir(root)?;
+    // Only called with a repository root, so it doubles as the tracked-file
+    // reference for rejecting a candidate that holds sources.
+    let build_output = build_output_dir(root, Some(root))?;
     let canonical_root = fs::canonicalize(root).ok()?;
     let relative = build_output.strip_prefix(&canonical_root).ok()?;
     let mut path = String::new();
@@ -340,6 +359,9 @@ fn source_state(repository: Option<&Path>) -> String {
         }
         return match Command::new("git")
             .current_dir(root)
+            // Refreshing the index would bump the mtime of a file this script
+            // watches, forcing one extra rerun after every fresh checkout.
+            .arg("--no-optional-locks")
             .args(&arguments)
             .output()
         {
