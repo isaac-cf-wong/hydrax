@@ -6,6 +6,7 @@
 //! `unknown`.
 
 use std::{
+    collections::HashSet,
     env,
     ffi::OsStr,
     fs,
@@ -115,7 +116,8 @@ fn watch_workspace(root: &Path) {
         println!("cargo:rerun-if-changed=src");
         return;
     }
-    watch_directory(root, build_output_dir().as_deref(), true);
+    let mut visited = HashSet::new();
+    watch_directory(root, build_output_dir(root).as_deref(), true, &mut visited);
 }
 
 /// Watch every entry of `directory` except Cargo's build output.
@@ -125,7 +127,19 @@ fn watch_workspace(root: &Path) {
 /// simply be skipped, or every crate beneath it would go unwatched. It is
 /// descended into instead, so each sibling of the output directory is watched
 /// individually and only the output subtree itself is left out.
-fn watch_directory(directory: &Path, build_output: Option<&Path>, is_root: bool) {
+///
+/// `visited` holds the canonical directories already descended into. A symlink
+/// pointing at one of its own ancestors would otherwise make this recurse until
+/// the build script overflows its stack.
+fn watch_directory(
+    directory: &Path,
+    build_output: Option<&Path>,
+    is_root: bool,
+    visited: &mut HashSet<PathBuf>,
+) {
+    if !visited.insert(fs::canonicalize(directory).unwrap_or_else(|_| directory.to_path_buf())) {
+        return;
+    }
     let Ok(entries) = fs::read_dir(directory) else {
         return;
     };
@@ -141,7 +155,7 @@ fn watch_directory(directory: &Path, build_output: Option<&Path>, is_root: bool)
         let path = entry.path();
         match classify(&path, build_output) {
             Disposition::Skip => {}
-            Disposition::Descend => watch_directory(&path, build_output, false),
+            Disposition::Descend => watch_directory(&path, build_output, false, visited),
             Disposition::Watch => println!("cargo:rerun-if-changed={}", path.display()),
         }
     }
@@ -180,18 +194,35 @@ fn classify(path: &Path, build_output: Option<&Path>) -> Disposition {
     Disposition::Watch
 }
 
+/// Files Cargo writes into the root of a build output directory.
+///
+/// `CACHEDIR.TAG` is written only when Cargo creates the directory itself, so
+/// it is missing whenever the directory already existed. `.rustc_info.json` is
+/// written on every build, which covers that case.
+const BUILD_OUTPUT_MARKERS: [&str; 2] = ["CACHEDIR.TAG", ".rustc_info.json"];
+
 /// Return the directory Cargo is writing build output into.
 ///
 /// `CARGO_TARGET_DIR` is not forwarded to build scripts, but `OUT_DIR` always
-/// sits inside the output directory. Cargo marks that directory with a
-/// `CACHEDIR.TAG` file, which identifies it whatever the user named it and
-/// wherever it was placed.
-fn build_output_dir() -> Option<PathBuf> {
+/// sits inside the output directory, and Cargo marks that directory's root.
+/// The outermost marked ancestor is taken so that a `--target <triple>`
+/// subdirectory does not stand in for the real root.
+fn build_output_dir(root: &Path) -> Option<PathBuf> {
     let out_dir = PathBuf::from(env::var_os("OUT_DIR")?);
     let out_dir = fs::canonicalize(&out_dir).unwrap_or(out_dir);
+    let canonical_root = fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
     out_dir
         .ancestors()
-        .find(|ancestor| ancestor.join("CACHEDIR.TAG").is_file())
+        // A marker at or above the workspace root would exclude the sources
+        // themselves, which is worse than excluding nothing.
+        .filter(|ancestor| !canonical_root.starts_with(ancestor))
+        .filter(|ancestor| {
+            BUILD_OUTPUT_MARKERS
+                .iter()
+                .any(|marker| ancestor.join(marker).is_file())
+        })
+        // `Ancestors` runs innermost-first and is not double-ended.
+        .last()
         .map(Path::to_path_buf)
 }
 
@@ -201,7 +232,7 @@ fn build_output_dir() -> Option<PathBuf> {
 /// conventional in-tree `target/` is already ignored by `.gitignore`; this
 /// matters for a custom `CARGO_TARGET_DIR` placed inside the workspace.
 fn build_output_pathspec(root: &Path) -> Option<String> {
-    let build_output = build_output_dir()?;
+    let build_output = build_output_dir(root)?;
     let canonical_root = fs::canonicalize(root).ok()?;
     let relative = build_output.strip_prefix(&canonical_root).ok()?;
     let mut path = String::new();
