@@ -164,12 +164,41 @@ checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 name = "hydrax"
 version = "0.1.0"
 dependencies = [
+ "hydrax-core",
+ "hydrax-io",
+ "hydrax-wave",
+]
+
+[[package]]
+name = "hydrax-cli"
+version = "0.1.0"
+dependencies = [
  "assert_cmd",
  "clap",
+ "hydrax",
  "predicates",
- "rustfft",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "hydrax-core"
+version = "0.1.0"
+
+[[package]]
+name = "hydrax-io"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "hydrax-wave"
+version = "0.1.0"
+dependencies = [
+ "hydrax-core",
+ "rustfft",
 ]
 
 [[package]]

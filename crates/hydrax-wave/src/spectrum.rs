@@ -1,6 +1,8 @@
 use rustfft::{FftPlanner, num_complex::Complex64};
 
-use crate::{Waveform, WaveformError};
+use hydrax_core::{WaveformError, index_as_f64};
+
+use crate::Waveform;
 
 /// A window applied before transforming a finite waveform.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -38,7 +40,7 @@ impl Window {
         let sum = (0..sample_count)
             .map(|index| self.weight(index, sample_count))
             .sum::<f64>();
-        Ok(sum / crate::quadrupole::index_as_f64(sample_count))
+        Ok(sum / index_as_f64(sample_count))
     }
 
     fn validate(self) -> Result<(), WaveformError> {
@@ -65,8 +67,8 @@ impl Window {
         if sample_count == 1 {
             return 1.0;
         }
-        let denominator = crate::quadrupole::index_as_f64(sample_count - 1);
-        let position = crate::quadrupole::index_as_f64(index) / denominator;
+        let denominator = index_as_f64(sample_count - 1);
+        let position = index_as_f64(index) / denominator;
         match self {
             Self::Rectangular | Self::Tukey { alpha: 0.0 } => 1.0,
             Self::Hann => 0.5 * (1.0 - (2.0 * std::f64::consts::PI * position).cos()),
@@ -150,8 +152,7 @@ impl WaveformSpectrum {
     /// Return the frequency of a bin in hertz.
     #[must_use]
     pub fn frequency_hz(&self, index: usize) -> Option<f64> {
-        (index < self.h_plus.len())
-            .then_some(crate::quadrupole::index_as_f64(index) * self.frequency_resolution_hz)
+        (index < self.h_plus.len()).then_some(index_as_f64(index) * self.frequency_resolution_hz)
     }
 
     /// Plus-polarization Fourier amplitudes.
@@ -221,11 +222,10 @@ fn transform(
     fft.process(&mut plus_buffer);
     fft.process(&mut cross_buffer);
 
-    let frequency_resolution_hz =
-        1.0 / (crate::quadrupole::index_as_f64(sample_count) * sample_interval_s);
+    let frequency_resolution_hz = 1.0 / (index_as_f64(sample_count) * sample_interval_s);
     let bin_count = sample_count / 2 + 1;
     let convert = |(index, value): (usize, &Complex64)| {
-        let frequency_hz = crate::quadrupole::index_as_f64(index) * frequency_resolution_hz;
+        let frequency_hz = index_as_f64(index) * frequency_resolution_hz;
         let phase = Complex64::from_polar(
             1.0,
             -2.0 * std::f64::consts::PI * frequency_hz * start_time_s,
@@ -257,7 +257,7 @@ fn transform(
 #[cfg(test)]
 mod tests {
     use super::{Window, transform};
-    use crate::WaveformError;
+    use hydrax_core::{WaveformError, index_as_f64};
 
     #[test]
     fn constant_signal_has_expected_dc_integral() {
@@ -278,16 +278,15 @@ mod tests {
         let bin = 5;
         let samples = (0..sample_count)
             .map(|index| {
-                let phase =
-                    2.0 * std::f64::consts::PI * crate::quadrupole::index_as_f64(bin * index)
-                        / crate::quadrupole::index_as_f64(sample_count);
+                let phase = 2.0 * std::f64::consts::PI * index_as_f64(bin * index)
+                    / index_as_f64(sample_count);
                 3.0 * phase.cos()
             })
             .collect::<Vec<_>>();
         let zeros = vec![0.0; sample_count];
         let spectrum = transform(0.0, sample_interval, &samples, &zeros, Window::Rectangular)
             .expect("valid input");
-        let expected = 3.0 * crate::quadrupole::index_as_f64(sample_count) * sample_interval / 2.0;
+        let expected = 3.0 * index_as_f64(sample_count) * sample_interval / 2.0;
 
         assert!((spectrum.h_plus()[bin].real_s() - expected).abs() < 1.0e-13);
         assert!(spectrum.h_plus()[bin].imaginary_s().abs() < 1.0e-13);
@@ -297,9 +296,7 @@ mod tests {
     #[test]
     fn absolute_start_time_rotates_spectral_phase() {
         let samples = (0..32)
-            .map(|index| {
-                (2.0 * std::f64::consts::PI * crate::quadrupole::index_as_f64(index) / 32.0).cos()
-            })
+            .map(|index| (2.0 * std::f64::consts::PI * index_as_f64(index) / 32.0).cos())
             .collect::<Vec<_>>();
         let zeros = vec![0.0; samples.len()];
         let unshifted =

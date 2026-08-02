@@ -1,7 +1,9 @@
-use crate::{
-    GRAVITATIONAL_CONSTANT_M3_KG_S2, QuadrupoleSeries, SPEED_OF_LIGHT_M_S, SymmetricTensor3,
-    WaveformError,
+use hydrax_core::{
+    GRAVITATIONAL_CONSTANT_M3_KG_S2, SPEED_OF_LIGHT_M_S, SymmetricTensor3, WaveformError,
+    index_as_f64,
 };
+
+use crate::QuadrupoleSeries;
 
 /// Centered finite-difference stencil for a third time derivative.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -56,9 +58,8 @@ impl EnergyDiagnostics {
     /// Time associated with a power sample.
     #[must_use]
     pub fn time_s(&self, index: usize) -> Option<f64> {
-        (index < self.power_w.len()).then_some(
-            self.start_time_s + crate::quadrupole::index_as_f64(index) * self.sample_interval_s,
-        )
+        (index < self.power_w.len())
+            .then_some(self.start_time_s + index_as_f64(index) * self.sample_interval_s)
     }
 
     /// Total radiated energy from trapezoidal integration, in joules.
@@ -70,8 +71,7 @@ impl EnergyDiagnostics {
     /// Mean power over the retained diagnostic interval, in watts.
     #[must_use]
     pub fn average_power_w(&self) -> f64 {
-        self.total_energy_j
-            / (crate::quadrupole::index_as_f64(self.power_w.len() - 1) * self.sample_interval_s)
+        self.total_energy_j / (index_as_f64(self.power_w.len() - 1) * self.sample_interval_s)
     }
 }
 
@@ -111,7 +111,7 @@ pub fn radiated_energy(
 
     Ok(EnergyDiagnostics {
         start_time_s: quadrupole.start_time_s()
-            + crate::quadrupole::index_as_f64(stencil.radius()) * quadrupole.sample_interval_s(),
+            + index_as_f64(stencil.radius()) * quadrupole.sample_interval_s(),
         sample_interval_s: quadrupole.sample_interval_s(),
         power_w,
         total_energy_j,
@@ -150,16 +150,16 @@ fn third_derivative(
 #[cfg(test)]
 mod tests {
     use super::{ThirdDerivativeStencil, radiated_energy, third_derivative};
-    use crate::{
-        GRAVITATIONAL_CONSTANT_M3_KG_S2, QuadrupoleSeries, SPEED_OF_LIGHT_M_S, SymmetricTensor3,
-        sinusoidal_quadrupole,
+    use crate::{QuadrupoleSeries, sinusoidal_quadrupole};
+    use hydrax_core::{
+        GRAVITATIONAL_CONSTANT_M3_KG_S2, SPEED_OF_LIGHT_M_S, SymmetricTensor3, index_as_f64,
     };
 
     #[test]
     fn isotropic_motion_radiates_no_energy() {
         let samples = (0..16)
             .map(|index| {
-                let time = crate::quadrupole::index_as_f64(index) * 0.01;
+                let time = index_as_f64(index) * 0.01;
                 SymmetricTensor3::isotropic(time.sin())
             })
             .collect();
@@ -180,7 +180,7 @@ mod tests {
     fn seven_point_stencil_is_exact_for_cubic() {
         let samples = (0..12)
             .map(|index| {
-                let time = crate::quadrupole::index_as_f64(index) * 0.1;
+                let time = index_as_f64(index) * 0.1;
                 SymmetricTensor3::new(time.powi(3), 0.0, 0.0, 0.0, 0.0, 0.0)
             })
             .collect();
