@@ -4,17 +4,20 @@ use std::{
     env,
     ffi::{OsStr, OsString},
     fs,
+    path::PathBuf,
     process::Command,
 };
 
 /// Export source, toolchain, target, feature, and dependency metadata.
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
-    println!("cargo:rerun-if-changed=Cargo.lock");
     println!("cargo:rerun-if-changed=Cargo.toml");
     println!("cargo:rerun-if-changed=src");
-    println!("cargo:rerun-if-changed=.git/HEAD");
-    println!("cargo:rerun-if-changed=.git/index");
+    for relative in ["Cargo.lock", ".git/HEAD", ".git/index"] {
+        if let Some(path) = workspace_file(relative) {
+            println!("cargo:rerun-if-changed={}", path.display());
+        }
+    }
 
     let rustc = env::var_os("RUSTC").unwrap_or_else(|| OsString::from("rustc"));
     emit(
@@ -85,19 +88,35 @@ fn enabled_features() -> String {
     features.join(",")
 }
 
+/// Locate a file in this crate's directory or any ancestor of it.
+///
+/// The lockfile and Git metadata live at the workspace root, which is two
+/// levels above this crate.
+fn workspace_file(relative: &str) -> Option<PathBuf> {
+    let manifest_dir = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR")?);
+    manifest_dir
+        .ancestors()
+        .map(|directory| directory.join(relative))
+        .find(|candidate| candidate.exists())
+}
+
 /// Return resolved package names and versions from the Cargo lockfile.
 fn resolved_dependencies() -> String {
-    let Ok(lockfile) = fs::read_to_string("Cargo.lock") else {
+    let Some(lockfile) =
+        workspace_file("Cargo.lock").and_then(|path| fs::read_to_string(path).ok())
+    else {
         return String::new();
     };
     let mut dependencies = Vec::new();
-    let mut name = None;
-    let mut version = None;
+    let mut name: Option<String> = None;
+    let mut version: Option<String> = None;
 
     for line in lockfile.lines().chain(["[[package]]"]) {
         if line == "[[package]]" {
             if let (Some(package), Some(package_version)) = (name.take(), version.take()) {
-                if package != "hydrax" {
+                // Workspace members share the crate version already recorded
+                // under `software`, so only external dependencies are listed.
+                if package != "hydrax" && !package.starts_with("hydrax-") {
                     dependencies.push(format!("{package}={package_version}"));
                 }
             }

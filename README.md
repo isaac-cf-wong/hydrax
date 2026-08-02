@@ -37,6 +37,23 @@ transport. Exact spherical symmetry is a verification stage: it emits no
 gravitational waves, so the first coupled collapse-and-waveform calculation
 requires at least axisymmetry.
 
+## Workspace layout
+
+Hydrax is a Cargo workspace with a narrow boundary between its layers:
+
+| Crate                | Contents                                                     |
+| -------------------- | ------------------------------------------------------------ |
+| `crates/hydrax`      | Safe public API; re-exports the layers below                 |
+| `crates/hydrax-cli`  | The `hydrax` binary                                          |
+| `crates/hydrax-core` | Units, symmetric tensors, numerical conventions, error types |
+| `crates/hydrax-wave` | Quadrupole sources, polarizations, spectra, radiated energy  |
+| `crates/hydrax-io`   | Provenance records and output serialization                  |
+
+Depend on `hydrax` rather than on a layer directly: the internal boundaries
+will move as the physics grows, while the facade stays stable. Every crate
+keeps `unsafe_code = "forbid"`; unsafe code is confined to the future
+`hydrax-kernels-sys` FFI crate.
+
 ## Development
 
 Install the stable Rust toolchain, then run the local quality checks:

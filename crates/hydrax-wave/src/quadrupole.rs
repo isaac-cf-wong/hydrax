@@ -1,4 +1,6 @@
-use crate::{SymmetricTensor3, WaveformError};
+use hydrax_core::{
+    SymmetricTensor3, WaveformError, index_as_f64, validate_finite, validate_positive,
+};
 
 /// A uniformly sampled Cartesian mass-quadrupole time series.
 #[derive(Debug, Clone, PartialEq)]
@@ -157,35 +159,11 @@ pub(crate) fn second_derivative(
     )
 }
 
-pub(crate) fn index_as_f64(index: usize) -> f64 {
-    // A vector large enough to exceed f64's exact integer range cannot be
-    // allocated on supported targets, so time-series indices remain exact.
-    #[allow(clippy::cast_precision_loss)]
-    let value = index as f64;
-    value
-}
-
-pub(crate) fn validate_finite(name: &'static str, value: f64) -> Result<(), WaveformError> {
-    if value.is_finite() {
-        Ok(())
-    } else {
-        Err(WaveformError::NonFiniteParameter { name, value })
-    }
-}
-
-pub(crate) fn validate_positive(name: &'static str, value: f64) -> Result<(), WaveformError> {
-    validate_finite(name, value)?;
-    if value > 0.0 {
-        Ok(())
-    } else {
-        Err(WaveformError::NonPositiveParameter { name, value })
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::{FiniteDifference, QuadrupoleSeries, second_derivative};
-    use crate::{SymmetricTensor3, WaveformError, sinusoidal_quadrupole};
+    use crate::sinusoidal_quadrupole;
+    use hydrax_core::{SymmetricTensor3, WaveformError};
 
     #[test]
     fn rejects_non_finite_sample() {

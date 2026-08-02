@@ -11,6 +11,14 @@ kernels for performance-critical calculations.
 The first time-domain quadrupole waveform API is available for verification.
 It is not yet a complete CCSN simulation.
 
+## Workspace Layout
+
+The public API lives in the `hydrax` crate, which re-exports three layers:
+`hydrax-core` (units, tensors, errors), `hydrax-wave` (quadrupole sources,
+waveforms, spectra, energy), and `hydrax-io` (provenance). The `hydrax-cli`
+crate builds the `hydrax` binary. Depend on `hydrax` rather than on a layer,
+so internal boundaries can move without breaking callers.
+
 ## Local Checks
 
 ```shell

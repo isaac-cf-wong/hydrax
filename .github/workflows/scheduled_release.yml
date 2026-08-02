@@ -85,27 +85,43 @@ jobs:
                   import os
                   from pathlib import Path
 
+                  import re
+
                   cargo_toml = Path("Cargo.toml")
                   version = os.environ["NEW_VERSION"]
                   lines = cargo_toml.read_text(encoding="utf-8").splitlines(keepends=True)
 
-                  in_package = False
-                  updated = False
+                  # Every crate inherits `[workspace.package] version`, and the
+                  # workspace-level path dependencies between them carry a
+                  # matching version requirement that must move in lockstep.
+                  section = None
+                  package_version_updated = False
+                  dependency_versions_updated = 0
                   for index, line in enumerate(lines):
                       stripped = line.strip()
-                      if stripped == "[package]":
-                          in_package = True
+                      newline = "\n" if line.endswith("\n") else ""
+                      if stripped.startswith("[") and stripped.endswith("]"):
+                          section = stripped
                           continue
-                      if in_package and stripped.startswith("["):
-                          break
-                      if in_package and stripped.startswith("version = "):
-                          newline = "\n" if line.endswith("\n") else ""
+                      if section == "[workspace.package]" and stripped.startswith("version = "):
                           lines[index] = f'version = "{version}"{newline}'
-                          updated = True
-                          break
+                          package_version_updated = True
+                      elif section == "[workspace.dependencies]" and stripped.startswith("hydrax"):
+                          replaced, count = re.subn(
+                              r'version = "[^"]*"', f'version = "{version}"', line
+                          )
+                          if count:
+                              lines[index] = replaced
+                              dependency_versions_updated += count
 
-                  if not updated:
-                      raise SystemExit("Could not find [package] version in Cargo.toml")
+                  if not package_version_updated:
+                      raise SystemExit(
+                          "Could not find [workspace.package] version in Cargo.toml"
+                      )
+                  if not dependency_versions_updated:
+                      raise SystemExit(
+                          "Could not find internal hydrax dependency versions in Cargo.toml"
+                      )
 
                   cargo_toml.write_text("".join(lines), encoding="utf-8")
                   PY

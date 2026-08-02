@@ -1,0 +1,23 @@
+[package]
+name = "hydrax"
+description = "Core-collapse supernova gravitational-wave simulation tools"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+keywords.workspace = true
+categories.workspace = true
+readme = "README.md"
+exclude = ["/.github"]
+
+[dependencies]
+hydrax-core.workspace = true
+hydrax-io.workspace = true
+hydrax-wave.workspace = true
+
+[lints]
+workspace = true

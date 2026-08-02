@@ -1,7 +1,5 @@
 //! Command-line entry point for Hydrax.
 
-mod provenance_record;
-
 use std::{
     io::{BufWriter, Write},
     path::PathBuf,
@@ -9,14 +7,18 @@ use std::{
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use hydrax::{
-    EnergyDiagnostics, FiniteDifference, Observer, PARSEC_M, ThirdDerivativeStencil, Waveform,
-    Window, radiated_energy, sinusoidal_quadrupole, waveform_from_quadrupole,
+    EnergyDiagnostics, FiniteDifference, Observer, OutputRecord, PARSEC_M, RunRecord,
+    ThirdDerivativeStencil, Waveform, Window, radiated_energy, sinusoidal_quadrupole,
+    waveform_from_quadrupole, write_provenance,
 };
 use serde::Serialize;
 
 /// Core-collapse supernova gravitational-wave simulation tools.
 #[derive(Debug, Parser)]
-#[command(version, about)]
+// The `about` text is the doc comment above, not this crate's package
+// description: the binary presents itself as Hydrax rather than as its
+// packaging crate.
+#[command(name = "hydrax", version)]
 struct Cli {
     #[command(subcommand)]
     command: Command,
@@ -181,7 +183,17 @@ fn write_demo(arguments: &DemoArgs) -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     if let Some(path) = &arguments.provenance {
-        provenance_record::write(path, arguments, arguments.output.schema())?;
+        write_provenance(
+            path,
+            RunRecord {
+                command: "demo",
+                configuration: arguments,
+            },
+            OutputRecord {
+                media_type: "text/csv",
+                schema: arguments.output.schema(),
+            },
+        )?;
     }
     Ok(())
 }

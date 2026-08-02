@@ -1,8 +1,9 @@
-use crate::quadrupole::{index_as_f64, validate_finite, validate_positive};
-use crate::{
-    FiniteDifference, GRAVITATIONAL_CONSTANT_M3_KG_S2, QuadrupoleSeries, SPEED_OF_LIGHT_M_S,
-    WaveformError,
+use hydrax_core::{
+    GRAVITATIONAL_CONSTANT_M3_KG_S2, SPEED_OF_LIGHT_M_S, WaveformError, index_as_f64,
+    validate_finite, validate_positive,
 };
+
+use crate::{FiniteDifference, QuadrupoleSeries};
 
 /// Location and orientation of a distant observer.
 ///
@@ -159,9 +160,9 @@ pub fn waveform_from_quadrupole(
 #[cfg(test)]
 mod tests {
     use super::{Observer, waveform_from_quadrupole};
-    use crate::{
-        FiniteDifference, GRAVITATIONAL_CONSTANT_M3_KG_S2, QuadrupoleSeries, SPEED_OF_LIGHT_M_S,
-        SymmetricTensor3, sinusoidal_quadrupole,
+    use crate::{FiniteDifference, QuadrupoleSeries, sinusoidal_quadrupole};
+    use hydrax_core::{
+        GRAVITATIONAL_CONSTANT_M3_KG_S2, SPEED_OF_LIGHT_M_S, SymmetricTensor3, index_as_f64,
     };
 
     const DISTANCE_M: f64 = 3.0e20;
@@ -236,7 +237,7 @@ mod tests {
         let sample_interval = 1.0 / 32_768.0;
         let samples = (0..512)
             .map(|index| {
-                let time = crate::quadrupole::index_as_f64(index) * sample_interval;
+                let time = index_as_f64(index) * sample_interval;
                 let moment = amplitude * (omega * time).cos();
                 SymmetricTensor3::new(0.0, 0.0, 0.0, moment, 0.0, 0.0)
             })
