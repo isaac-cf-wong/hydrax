@@ -41,15 +41,28 @@ The top-level `schema` value is `hydrax.provenance.v1`. Its fields are:
 
 | Object     | Recorded information                                                                                                                                               |
 | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `software` | Package name and version, repository, Git revision, and whether the build source tree was clean, modified, or unavailable.                                         |
+| `software` | Package name and version, repository, Git revision, and the state of the build source tree.                                                                        |
 | `build`    | Rust compiler, compilation target and profile, enabled Cargo features, floating-point precision, and every resolved dependency name and version from `Cargo.lock`. |
 | `run`      | Command name and the complete parsed runtime configuration, including explicit defaults and the provenance destination.                                            |
 | `output`   | Media type and the exact CSV schema identifier selected by the command.                                                                                            |
 
-When Hydrax is built outside a Git checkout, `source_revision` or
-`source_state` can be `unknown`; the package version and build information
-remain available. The source state describes the tree at compilation time, not
-at execution time.
+`source_state` takes one of four values:
+
+| Value      | Meaning                                                                                                                                              |
+| ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `clean`    | The workspace was a Git checkout matching `source_revision` exactly.                                                                                 |
+| `modified` | The workspace was a Git checkout with uncommitted or untracked changes.                                                                              |
+| `packaged` | The build used a published `.crate`; `source_revision` comes from its packaged VCS metadata and there was no working tree that could differ from it. |
+| `unknown`  | Neither a Git checkout nor packaged metadata was available.                                                                                          |
+
+When Hydrax is built outside a Git checkout, `source_revision` can likewise be
+`unknown`; the package version and build information remain available. The
+source state describes the tree at compilation time, not at execution time, and
+it describes the whole workspace rather than any single crate.
+
+Consumers should treat `source_state` as an open vocabulary and accept an
+unrecognized value rather than failing, in line with the field-compatibility
+rule below.
 
 Consumers must reject an unsupported provenance major version. Within a major
 version, they should ignore fields they do not recognize so compatible

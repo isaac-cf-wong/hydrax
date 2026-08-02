@@ -86,28 +86,38 @@ fn is_hydrax_workspace(directory: &Path) -> bool {
         && directory.join("crates/hydrax-core/Cargo.toml").is_file()
 }
 
-/// Watch every workspace source that can change the recorded revision.
+/// Directories at the workspace root that must never be watched.
 ///
-/// Watching only this crate would let an incremental rebuild reuse a stale
-/// sidecar after another crate changed.
+/// `target` is written by the build itself, and `.git` is watched precisely by
+/// [`watch_git`] instead of wholesale; both would otherwise cause the build
+/// script to rerun on every invocation.
+const UNWATCHED_ROOT_ENTRIES: [&str; 3] = ["target", ".git", ".codegraph"];
+
+/// Watch every workspace file that can change the recorded revision or state.
+///
+/// The recorded state comes from `git status` over the whole workspace, so the
+/// watch set has to be the whole workspace too. Watching only each crate's
+/// sources would leave `README.md`, `docs/`, workflow files, and future C
+/// sources outside `src/` able to dirty the tree without invalidating this
+/// script. Cargo walks watched directories recursively, so new files inside
+/// them are covered as well.
 fn watch_workspace(root: &Path) {
-    for relative in ["Cargo.toml", "Cargo.lock"] {
-        println!("cargo:rerun-if-changed={}", root.join(relative).display());
-    }
-    let Ok(entries) = fs::read_dir(root.join("crates")) else {
+    let Ok(entries) = fs::read_dir(root) else {
+        // Fall back to the crate's own sources rather than silently watching
+        // nothing.
+        println!("cargo:rerun-if-changed=Cargo.toml");
+        println!("cargo:rerun-if-changed=src");
         return;
     };
     for entry in entries.flatten() {
-        let crate_dir = entry.path();
-        if !crate_dir.is_dir() {
+        let name = entry.file_name();
+        if UNWATCHED_ROOT_ENTRIES
+            .iter()
+            .any(|unwatched| name == *unwatched)
+        {
             continue;
         }
-        for relative in ["Cargo.toml", "src", "build.rs"] {
-            let path = crate_dir.join(relative);
-            if path.exists() {
-                println!("cargo:rerun-if-changed={}", path.display());
-            }
-        }
+        println!("cargo:rerun-if-changed={}", entry.path().display());
     }
 }
 
@@ -138,9 +148,13 @@ fn watch_git(root: &Path) {
         paths.push(reference);
     }
     for path in paths {
-        if let Some(resolved) = git_output(root, &["rev-parse", "--git-path", &path]) {
-            println!("cargo:rerun-if-changed={resolved}");
-        }
+        let Some(resolved) = git_output(root, &["rev-parse", "--git-path", &path]) else {
+            continue;
+        };
+        // `--git-path` answers relative to the repository, but Cargo resolves
+        // a relative `rerun-if-changed` against this crate's directory. Emit
+        // an absolute path so the watch lands on the real file.
+        println!("cargo:rerun-if-changed={}", root.join(resolved).display());
     }
 }
 
@@ -173,13 +187,27 @@ fn source_state(repository: Option<&Path>) -> String {
 }
 
 /// Read the revision Cargo recorded when packaging this crate.
+///
+/// The value is scanned rather than parsed, so it is validated as a full
+/// Git object name before use: a malformed or future-shaped record (say
+/// `"sha1": null`) would otherwise let the scan run on and return a later
+/// quoted value as the revision.
 fn packaged_revision() -> Option<String> {
     let manifest_dir = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR")?);
     let info = fs::read_to_string(manifest_dir.join(".cargo_vcs_info.json")).ok()?;
     let (_, after) = info.split_once("\"sha1\"")?;
-    let (_, after) = after.split_once('"')?;
+    let (between, after) = after.split_once('"')?;
+    // Only whitespace and the key separator may sit before the opening quote.
+    if between.trim() != ":" {
+        return None;
+    }
     let (sha1, _) = after.split_once('"')?;
-    (!sha1.is_empty()).then(|| sha1.to_owned())
+    is_object_name(sha1).then(|| sha1.to_owned())
+}
+
+/// Report whether a string is a full hexadecimal Git object name.
+fn is_object_name(value: &str) -> bool {
+    value.len() == 40 && value.chars().all(|character| character.is_ascii_hexdigit())
 }
 
 /// Run a Git command in a repository and return its trimmed output.
