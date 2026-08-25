@@ -159,16 +159,169 @@ pub fn waveform_from_quadrupole(
 
 #[cfg(test)]
 mod tests {
-    use super::{Observer, waveform_from_quadrupole};
+    use super::{Observer, Waveform, waveform_from_quadrupole};
     use crate::{FiniteDifference, QuadrupoleSeries, sinusoidal_quadrupole};
     use hydrax_core::{
         GRAVITATIONAL_CONSTANT_M3_KG_S2, SPEED_OF_LIGHT_M_S, SymmetricTensor3, index_as_f64,
     };
+    use std::f64::consts::PI;
 
     const DISTANCE_M: f64 = 3.0e20;
 
+    /// Rotations covering a full turn in both directions. The quarter turn
+    /// exchanges the two polarizations and the half turn restores them, so a
+    /// wrong factor in front of the angle cannot pass unnoticed.
+    const ROTATIONS_RAD: [f64; 12] = [
+        0.0,
+        0.1,
+        PI / 6.0,
+        PI / 4.0,
+        PI / 3.0,
+        PI / 2.0,
+        2.0 * PI / 3.0,
+        PI,
+        -0.7,
+        -PI / 4.0,
+        3.0 * PI,
+        5.5,
+    ];
+
+    /// Largest deviation from the 2ψ mixing law, as a fraction of the reference
+    /// waveform's peak strain, that round-off alone can produce. Measured
+    /// round-off stays below `1.0e-14`, while a basis that does not rotate
+    /// correctly about the line of sight deviates by order unity.
+    const MIXING_TOLERANCE: f64 = 1.0e-13;
+
     fn maximum_absolute(values: &[f64]) -> f64 {
         values.iter().copied().map(f64::abs).fold(0.0, f64::max)
+    }
+
+    fn dot(left: [f64; 3], right: [f64; 3]) -> f64 {
+        left[0] * right[0] + left[1] * right[1] + left[2] * right[2]
+    }
+
+    fn cross(left: [f64; 3], right: [f64; 3]) -> [f64; 3] {
+        [
+            left[1] * right[2] - left[2] * right[1],
+            left[2] * right[0] - left[0] * right[2],
+            left[0] * right[1] - left[1] * right[0],
+        ]
+    }
+
+    /// The unit direction from the source toward the observer.
+    fn line_of_sight(observer: Observer) -> [f64; 3] {
+        let (sin_theta, cos_theta) = observer.inclination_rad().sin_cos();
+        let (sin_phi, cos_phi) = observer.azimuth_rad().sin_cos();
+        [sin_theta * cos_phi, sin_theta * sin_phi, cos_theta]
+    }
+
+    /// Rows of the matrix that rotates a vector by `angle_rad` about the unit
+    /// vector `axis`, following Rodrigues' formula.
+    fn rotation_rows(axis: [f64; 3], angle_rad: f64) -> [[f64; 3]; 3] {
+        let (sin, cos) = angle_rad.sin_cos();
+        let versine = 1.0 - cos;
+        let [x, y, z] = axis;
+        [
+            [
+                cos + versine * x * x,
+                versine * x * y - sin * z,
+                versine * x * z + sin * y,
+            ],
+            [
+                versine * y * x + sin * z,
+                cos + versine * y * y,
+                versine * y * z - sin * x,
+            ],
+            [
+                versine * z * x - sin * y,
+                versine * z * y + sin * x,
+                cos + versine * z * z,
+            ],
+        ]
+    }
+
+    /// Rotate every quadrupole sample by `angle_rad` about `axis`, forming
+    /// `R Q Rᵀ`.
+    fn rotate_source(
+        source: &QuadrupoleSeries,
+        axis: [f64; 3],
+        angle_rad: f64,
+    ) -> QuadrupoleSeries {
+        let rows = rotation_rows(axis, angle_rad);
+        let samples = source
+            .samples()
+            .iter()
+            .map(|sample| {
+                SymmetricTensor3::new(
+                    sample.contract(rows[0], rows[0]),
+                    sample.contract(rows[1], rows[1]),
+                    sample.contract(rows[2], rows[2]),
+                    sample.contract(rows[0], rows[1]),
+                    sample.contract(rows[0], rows[2]),
+                    sample.contract(rows[1], rows[2]),
+                )
+            })
+            .collect();
+        QuadrupoleSeries::new(source.start_time_s(), source.sample_interval_s(), samples)
+            .expect("valid source")
+    }
+
+    /// A source with all six components active and mutually offset in phase, so
+    /// no observer sees a waveform that a rotation could leave unchanged.
+    fn anisotropic_source() -> QuadrupoleSeries {
+        let amplitude = 1.0e38;
+        let omega = 2.0 * PI * 2000.0;
+        let sample_interval = 1.0 / 32_768.0;
+        let samples = (0..256)
+            .map(|index| {
+                let phase = omega * index_as_f64(index) * sample_interval;
+                SymmetricTensor3::new(
+                    amplitude * phase.cos(),
+                    -0.4 * amplitude * (phase + 0.9).cos(),
+                    0.7 * amplitude * (phase - 1.7).cos(),
+                    0.6 * amplitude * (phase - 0.5).sin(),
+                    0.3 * amplitude * phase.sin(),
+                    -0.2 * amplitude * (phase + 1.3).cos(),
+                )
+            })
+            .collect();
+        QuadrupoleSeries::new(0.0, sample_interval, samples).expect("valid source")
+    }
+
+    /// Assert that both polarizations of `reference` carry comparable strain, so
+    /// that mixing them is observable.
+    fn assert_both_polarizations_present(reference: &Waveform) {
+        let peak = maximum_absolute(reference.h_plus()).max(maximum_absolute(reference.h_cross()));
+        assert!(maximum_absolute(reference.h_plus()) > 0.2 * peak);
+        assert!(maximum_absolute(reference.h_cross()) > 0.2 * peak);
+    }
+
+    /// Assert that `rotated` holds the polarizations of `reference` mixed by a
+    /// rotation through twice `rotation_rad`.
+    fn assert_polarizations_mixed_by_twice(
+        reference: &Waveform,
+        rotated: &Waveform,
+        rotation_rad: f64,
+    ) {
+        let peak = maximum_absolute(reference.h_plus()).max(maximum_absolute(reference.h_cross()));
+        let (sin_double, cos_double) = (2.0 * rotation_rad).sin_cos();
+        assert_eq!(reference.h_plus().len(), rotated.h_plus().len());
+
+        let expected = reference.h_plus().iter().zip(reference.h_cross());
+        let actual = rotated.h_plus().iter().zip(rotated.h_cross());
+        for ((&plus, &cross), (&rotated_plus, &rotated_cross)) in expected.zip(actual) {
+            let plus_error = (rotated_plus - (cos_double * plus + sin_double * cross)).abs() / peak;
+            let cross_error =
+                (rotated_cross - (cos_double * cross - sin_double * plus)).abs() / peak;
+            assert!(
+                plus_error < MIXING_TOLERANCE,
+                "rotation {rotation_rad} rad: plus error {plus_error}"
+            );
+            assert!(
+                cross_error < MIXING_TOLERANCE,
+                "rotation {rotation_rad} rad: cross error {cross_error}"
+            );
+        }
     }
 
     #[test]
@@ -287,6 +440,109 @@ mod tests {
         }
         for (expected, actual) in expected.h_cross().iter().zip(actual.h_cross()) {
             assert!((expected - actual).abs() < 1.0e-45);
+        }
+    }
+
+    /// An observer rotation about the line of sight transforms the two
+    /// polarizations correctly.
+    ///
+    /// At zero inclination the line of sight is the z-axis whatever the azimuth,
+    /// so advancing the azimuth by ψ leaves the observer where it is and turns
+    /// its transverse basis `(p, q)` through ψ about the line of sight. The
+    /// polarizations must then mix as a rotation through 2ψ: a quarter turn
+    /// exchanges them and a half turn restores them.
+    #[test]
+    fn observer_rotation_about_line_of_sight_mixes_polarizations_by_twice_the_angle() {
+        let source = anisotropic_source();
+        let reference = waveform_from_quadrupole(
+            &source,
+            Observer::new(DISTANCE_M, 0.0, 0.0).expect("valid observer"),
+            FiniteDifference::FivePoint,
+        )
+        .expect("enough samples");
+        assert_both_polarizations_present(&reference);
+
+        for rotation_rad in ROTATIONS_RAD {
+            let rotated = waveform_from_quadrupole(
+                &source,
+                Observer::new(DISTANCE_M, 0.0, rotation_rad).expect("valid observer"),
+                FiniteDifference::FivePoint,
+            )
+            .expect("enough samples");
+            assert_polarizations_mixed_by_twice(&reference, &rotated, rotation_rad);
+        }
+    }
+
+    /// The same requirement away from the pole.
+    ///
+    /// Only at the pole does the azimuth turn the observer's basis about the
+    /// line of sight, so at a general sky position the rotation is applied to
+    /// the source instead: turning the source through −ψ about the line of
+    /// sight describes the same physical configuration as turning the observer's
+    /// basis through +ψ about it, and must mix the polarizations by 2ψ. Unlike
+    /// the pole, this exercises the inclination-dependent components of `p`.
+    #[test]
+    fn observer_rotation_mixes_polarizations_at_a_general_sky_position() {
+        let source = anisotropic_source();
+        for (inclination_rad, azimuth_rad) in [(0.7, -0.4), (1.9, 2.3), (2.9, 0.15)] {
+            let observer =
+                Observer::new(DISTANCE_M, inclination_rad, azimuth_rad).expect("valid observer");
+            let axis = line_of_sight(observer);
+            let reference =
+                waveform_from_quadrupole(&source, observer, FiniteDifference::FivePoint)
+                    .expect("enough samples");
+            assert_both_polarizations_present(&reference);
+
+            for rotation_rad in ROTATIONS_RAD {
+                let rotated_source = rotate_source(&source, axis, -rotation_rad);
+                let rotated = waveform_from_quadrupole(
+                    &rotated_source,
+                    observer,
+                    FiniteDifference::FivePoint,
+                )
+                .expect("enough samples");
+                assert_polarizations_mixed_by_twice(&reference, &rotated, rotation_rad);
+            }
+        }
+    }
+
+    /// The 2ψ mixing law holds only because `(p, q, n)` is a right-handed
+    /// orthonormal triad whose first two vectors are transverse to the line of
+    /// sight `n`. Sweeping both angles past the poles and beyond a full turn
+    /// covers the whole domain the constructor accepts.
+    #[test]
+    fn polarization_basis_is_a_right_handed_transverse_triad() {
+        for inclination_step in -4_i32..=12 {
+            for azimuth_step in -6_i32..=6 {
+                let inclination_rad = f64::from(inclination_step) * PI / 6.0;
+                let azimuth_rad = f64::from(azimuth_step) * PI / 4.0;
+                let observer = Observer::new(DISTANCE_M, inclination_rad, azimuth_rad)
+                    .expect("valid observer");
+                let (p, q) = observer.polarization_basis();
+                let n = line_of_sight(observer);
+                let angles = format!("inclination {inclination_rad}, azimuth {azimuth_rad}");
+
+                assert!(
+                    (dot(p, p) - 1.0).abs() < 1.0e-14,
+                    "p is not a unit vector: {angles}"
+                );
+                assert!(
+                    (dot(q, q) - 1.0).abs() < 1.0e-14,
+                    "q is not a unit vector: {angles}"
+                );
+                assert!(
+                    dot(p, q).abs() < 1.0e-14,
+                    "p and q are not orthogonal: {angles}"
+                );
+                assert!(dot(p, n).abs() < 1.0e-14, "p is not transverse: {angles}");
+                assert!(dot(q, n).abs() < 1.0e-14, "q is not transverse: {angles}");
+                for (component, expected) in cross(p, q).into_iter().zip(n) {
+                    assert!(
+                        (component - expected).abs() < 1.0e-14,
+                        "p × q is not the line of sight: {angles}"
+                    );
+                }
+            }
         }
     }
 }
