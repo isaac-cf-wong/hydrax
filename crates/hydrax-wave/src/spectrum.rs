@@ -75,14 +75,15 @@ impl Window {
             Self::Tukey { alpha: 1.0 } => {
                 0.5 * (1.0 - (2.0 * std::f64::consts::PI * position).cos())
             }
-            Self::Tukey { alpha } if position < alpha / 2.0 => {
-                0.5 * (1.0 + (std::f64::consts::PI * (2.0 * position / alpha - 1.0)).cos())
-            }
+            Self::Tukey { alpha } if position < alpha / 2.0 => f64::midpoint(
+                1.0,
+                (std::f64::consts::PI * (2.0 * position / alpha - 1.0)).cos(),
+            ),
             Self::Tukey { alpha } if position <= 1.0 - alpha / 2.0 => 1.0,
-            Self::Tukey { alpha } => {
-                0.5 * (1.0
-                    + (std::f64::consts::PI * (2.0 * position / alpha - 2.0 / alpha + 1.0)).cos())
-            }
+            Self::Tukey { alpha } => f64::midpoint(
+                1.0,
+                (std::f64::consts::PI * (2.0 * position / alpha - 2.0 / alpha + 1.0)).cos(),
+            ),
         }
     }
 }
