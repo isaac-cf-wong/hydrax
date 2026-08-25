@@ -1,8 +1,8 @@
 //! Capture reproducibility metadata for provenance sidecars.
 //!
 //! This script describes the whole Hydrax workspace, not just the crate it
-//! belongs to, so it has to watch the whole workspace: a sidecar that reports
-//! a revision Cargo did not rebuild for is worse than one that reports
+//! belongs to, so it watches every file Git tracks: a sidecar that reports a
+//! revision Cargo did not rebuild for is worse than one that reports
 //! `unknown`.
 
 use std::{
@@ -20,16 +20,11 @@ fn main() {
 
     let workspace = hydrax_workspace_root();
     let repository = workspace.as_deref().and_then(git_repository);
-    if let Some(root) = workspace.as_deref() {
-        watch_workspace(root, repository.as_deref());
-    } else {
-        // Packaged or vendored sources: the crate's own files are all that can
-        // be observed.
-        println!("cargo:rerun-if-changed=Cargo.toml");
-        println!("cargo:rerun-if-changed=src");
-    }
-    if let Some(root) = &repository {
+    if let Some(root) = repository.as_deref() {
+        watch_tracked_files(root);
         watch_git(root);
+    } else {
+        watch_crate_sources(workspace.as_deref());
     }
 
     let rustc = env::var_os("RUSTC").unwrap_or_else(|| PathBuf::from("rustc").into_os_string());
@@ -86,213 +81,204 @@ fn is_hydrax_workspace(directory: &Path) -> bool {
         && directory.join("crates/hydrax-core/Cargo.toml").is_file()
 }
 
-/// Entries at the workspace root that must never be watched.
+/// Watch every file Git tracks in the repository.
 ///
-/// `.git` is watched precisely by [`watch_git`] instead of wholesale, and
-/// `.codegraph` is a local tool cache. The build output directory is excluded
-/// separately by [`classify`], because it is not always called `target` and is
-/// not always at the workspace root.
-const UNWATCHED_ROOT_ENTRIES: [&str; 2] = [".git", ".codegraph"];
-
-/// Watch every workspace file that can change the recorded revision or state.
+/// The watch set is the tracked-file list rather than a walk of the working
+/// tree, because tracked files exclude Cargo's build output by construction:
+/// nothing here has to recognise that output directory. Recognising it went
+/// wrong four times over — by top-level path component, by `CACHEDIR.TAG`, by
+/// `.rustc_info.json`, and by excluding a candidate that held tracked source —
+/// and each mistake either reported a modified tree as `clean` or reran this
+/// script on every build. `git status` is left unfiltered to match: an output
+/// directory placed inside the repository and not ignored genuinely is a dirty
+/// tree.
 ///
-/// The recorded state comes from `git status` over the whole workspace, so the
-/// watch set has to be the whole workspace too. Watching only each crate's
-/// sources would leave `README.md`, `docs/`, workflow files, and future C
-/// sources outside `src/` able to dirty the tree without invalidating this
-/// script. Cargo walks watched directories recursively, so files created inside
-/// a watched directory are covered as well.
+/// The listing is handled as bytes, one entry at a time. A pathname is a byte
+/// string, not text, and a name that is not valid UTF-8 — or that no directive
+/// can carry — must cost that one name rather than the whole set: falling back
+/// to the crate's own sources over a single awkward filename would leave every
+/// other tracked file able to change the reported state without this script
+/// running again.
 ///
-/// One gap remains by construction: an entry created at the workspace root
-/// itself after a build is not watched, because the root directory cannot be
-/// watched without pulling in the build output. Closing it would mean rerunning
-/// this script on every build, which costs a relink of every dependent crate.
-fn watch_workspace(root: &Path, repository: Option<&Path>) {
-    if fs::read_dir(root).is_err() {
-        // Fall back to the crate's own sources rather than silently watching
-        // nothing.
-        println!("cargo:rerun-if-changed=Cargo.toml");
-        println!("cargo:rerun-if-changed=src");
-        return;
-    }
-    let mut visited = HashSet::new();
-    let build_output = build_output_dir(root, repository);
-    watch_directory(root, build_output.as_deref(), true, &mut visited);
-}
-
-/// Watch every entry of `directory` except Cargo's build output.
-///
-/// When the output directory sits inside a source directory — a nested
-/// `CARGO_TARGET_DIR` such as `crates/hydrax-io/target` — that ancestor cannot
-/// simply be skipped, or every crate beneath it would go unwatched. It is
-/// descended into instead, so each sibling of the output directory is watched
-/// individually and only the output subtree itself is left out.
-///
-/// `visited` holds the canonical directories already descended into. A symlink
-/// pointing at one of its own ancestors would otherwise make this recurse until
-/// the build script overflows its stack.
-fn watch_directory(
-    directory: &Path,
-    build_output: Option<&Path>,
-    is_root: bool,
-    visited: &mut HashSet<PathBuf>,
-) {
-    if !visited.insert(fs::canonicalize(directory).unwrap_or_else(|_| directory.to_path_buf())) {
-        return;
-    }
-    let Ok(entries) = fs::read_dir(directory) else {
+/// The one thing not watched at all is a file Git does not track yet. Staging
+/// it writes the index, which [`watch_git`] watches, and a new file cannot take
+/// part in a build without a tracked manifest or module naming it.
+fn watch_tracked_files(root: &Path) {
+    let Some(listing) = git_listing(root, &["ls-files", "-z"]) else {
+        watch_crate_sources(Some(root));
         return;
     };
-    for entry in entries.flatten() {
-        let name = entry.file_name();
-        if is_root
-            && UNWATCHED_ROOT_ENTRIES
-                .iter()
-                .any(|unwatched| name == *unwatched)
-        {
+    let output = build_output();
+    let mut enclosing = HashSet::new();
+    let mut watched = false;
+    let mut unwatched = 0_usize;
+    for entry in listing.split(|byte| *byte == 0) {
+        let Some(path) = tracked_path(root, entry) else {
+            // Only reachable where a pathname has to be text: a name Git
+            // reports that the platform cannot address is left to the warning
+            // below rather than silently dropped.
+            if !entry.is_empty() {
+                unwatched += 1;
+            }
+            continue;
+        };
+        let Ok(metadata) = fs::metadata(&path) else {
+            // Cargo treats a path it cannot stat as permanently changed, so a
+            // tracked file that is gone from the working tree stays out of the
+            // set. Its deletion is still seen once, because the build before it
+            // was watching the file.
+            continue;
+        };
+        if metadata.is_dir() {
+            // Only a submodule is reported as a tracked directory. Cargo walks
+            // a watched directory recursively, which would pull the submodule's
+            // own build output in and rerun this script on every build.
             continue;
         }
-        let path = entry.path();
-        match classify(&path, build_output) {
-            Disposition::Skip => {}
-            Disposition::Descend => watch_directory(&path, build_output, false, visited),
-            Disposition::Watch => println!("cargo:rerun-if-changed={}", path.display()),
+        if emit_watch(&path)
+            || watch_enclosing_directory(&path, root, output.as_deref(), &mut enclosing)
+        {
+            watched = true;
+        } else {
+            unwatched += 1;
         }
     }
+    if !watched {
+        watch_crate_sources(Some(root));
+    }
+    if unwatched > 0 {
+        // Staying quiet would leave a tracked file able to change the reported
+        // source state without this script running again.
+        println!(
+            "cargo:warning=hydrax provenance: {unwatched} tracked file(s) have names no build \
+             script directive can carry, and no directory above them could stand in; an edit to \
+             one of them may leave the recorded source state stale"
+        );
+    }
 }
 
-/// What [`watch_directory`] should do with one entry.
-enum Disposition {
-    /// The entry is Cargo's build output.
-    Skip,
-    /// The entry contains Cargo's build output somewhere beneath it.
-    Descend,
-    /// The entry is ordinary source.
-    Watch,
-}
-
-/// Decide how an entry relates to Cargo's build output.
+/// Ask Cargo to watch one file, and report whether it did.
 ///
-/// Watching the output directory would make the build dirty itself: the script
-/// writes into it, so every no-op build would rerun the script.
-fn classify(path: &Path, build_output: Option<&Path>) -> Disposition {
-    let Some(build_output) = build_output else {
-        // Without `OUT_DIR`, fall back to the conventional name.
-        if path.file_name().is_some_and(|name| name == "target") {
-            return Disposition::Skip;
+/// Cargo treats a watched path it cannot stat as permanently changed, so an
+/// absent one reruns this script on every build. Asking the same question Cargo
+/// will — metadata through any symlink — keeps that out of the watch set, at no
+/// cost: the build before a path vanished was watching it, and a watched path
+/// disappearing reruns the script once. Both cases arise here, a tracked file
+/// deleted from the working tree and `packed-refs` in a repository whose refs
+/// are all still loose.
+fn watch(path: &Path) -> bool {
+    fs::metadata(path).is_ok_and(|metadata| !metadata.is_dir()) && emit_watch(path)
+}
+
+/// Watch the nearest directory above `path` that a directive can name.
+///
+/// Cargo walks a watched directory recursively, so watching the directory that
+/// holds a file covers the file too — the only way to watch one whose own name
+/// cannot be written. A directory holding Cargo's build output is refused: the
+/// build writes there, so watching it would rerun this script every time. Every
+/// directory further up holds that output as well, which ends the walk.
+fn watch_enclosing_directory(
+    path: &Path,
+    root: &Path,
+    output: Option<&Path>,
+    watched: &mut HashSet<PathBuf>,
+) -> bool {
+    for directory in path.ancestors().skip(1) {
+        // The repository root is the outermost directory worth watching; above
+        // it lies the rest of the machine.
+        if !directory.starts_with(root) {
+            return false;
         }
-        return Disposition::Watch;
-    };
-    let canonical = fs::canonicalize(path);
-    let path = canonical.as_deref().unwrap_or(path);
-    if build_output == path {
-        return Disposition::Skip;
+        if output.is_some_and(|output| output.starts_with(directory)) {
+            return false;
+        }
+        if watched.contains(directory) {
+            // Already watched, for an earlier file with an equally awkward name.
+            return true;
+        }
+        if emit_watch(directory) {
+            watched.insert(directory.to_path_buf());
+            return true;
+        }
     }
-    if build_output.starts_with(path) {
-        return Disposition::Descend;
-    }
-    Disposition::Watch
+    false
 }
 
-/// Files Cargo writes into the root of a build output directory.
+/// Locate Cargo's build output, for the one decision that needs to know.
 ///
-/// Neither is guaranteed. `CACHEDIR.TAG` is written only when Cargo creates the
-/// directory itself, so it is missing whenever the directory already existed,
-/// and `.rustc_info.json` is suppressed by `CARGO_CACHE_RUSTC_INFO=0`. When
-/// both are absent the layout is used instead, see [`layout_output_dir`].
-const BUILD_OUTPUT_MARKERS: [&str; 2] = ["CACHEDIR.TAG", ".rustc_info.json"];
-
-/// Return the directory Cargo is writing build output into.
-///
-/// `CARGO_TARGET_DIR` is not forwarded to build scripts, but `OUT_DIR` always
-/// sits inside the output directory. A marker file identifies its root when one
-/// exists; otherwise the root is derived from the fixed layout below `OUT_DIR`.
-fn build_output_dir(root: &Path, repository: Option<&Path>) -> Option<PathBuf> {
+/// This is not the output-root detection the watch set used to rest on: no
+/// marker file, layout shape or directory name is consulted, and nothing is
+/// excluded from `git status`. `OUT_DIR` is simply somewhere inside the output,
+/// which is all it takes to refuse to watch a directory that contains it.
+fn build_output() -> Option<PathBuf> {
     let out_dir = PathBuf::from(env::var_os("OUT_DIR")?);
-    let out_dir = fs::canonicalize(&out_dir).unwrap_or(out_dir);
-    let canonical_root = fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
-    // A candidate at or above the workspace root would exclude the sources
-    // themselves, which is worse than excluding nothing. The same is true of
-    // any candidate holding tracked files: excluding one hides real edits and
-    // reports a clean tree that is not clean. Excluding nothing only costs
-    // rebuilds.
-    let is_below_root = |candidate: &Path| !canonical_root.starts_with(candidate);
-    let holds_no_source =
-        |candidate: &Path| !repository.is_some_and(|repo| tracks_any_file(repo, candidate));
-    let is_usable = |candidate: &&Path| is_below_root(candidate) && holds_no_source(candidate);
-
-    let marked = out_dir
-        .ancestors()
-        .filter(is_usable)
-        .filter(|ancestor| {
-            BUILD_OUTPUT_MARKERS
-                .iter()
-                .any(|marker| ancestor.join(marker).is_file())
-        })
-        // The outermost marked ancestor, so that a `--target <triple>`
-        // subdirectory does not stand in for the real root. `Ancestors` runs
-        // innermost-first and is not double-ended.
-        .last()
-        .map(Path::to_path_buf);
-    marked
-        .or_else(|| layout_output_dir(&out_dir).filter(|candidate| is_usable(&candidate.as_path())))
+    Some(fs::canonicalize(&out_dir).unwrap_or(out_dir))
 }
 
-/// Report whether Git tracks any file inside `candidate`.
-///
-/// A path outside the repository makes `ls-files` fail, which counts as
-/// untracked: an output directory elsewhere on disk is safe to exclude.
-fn tracks_any_file(repository: &Path, candidate: &Path) -> bool {
-    candidate
-        .to_str()
-        .is_some_and(|path| git_output(repository, &["ls-files", "--", path]).is_some())
+/// Write one watch directive, and report whether the path could be written.
+fn emit_watch(path: &Path) -> bool {
+    let Some(name) = watchable_name(path) else {
+        return false;
+    };
+    println!("cargo:rerun-if-changed={name}");
+    true
 }
 
-/// Derive the build output root from the shape of `OUT_DIR`.
+/// Resolve one pathname from the tracked listing against the repository root.
 ///
-/// Cargo lays out `<root>/[<triple>/]<profile>/build/<package>-<hash>/out`, so
-/// the innermost `build` component locates the rest. This is the fallback for
-/// an output directory carrying no marker file at all.
-fn layout_output_dir(out_dir: &Path) -> Option<PathBuf> {
-    let build = out_dir
-        .ancestors()
-        .find(|ancestor| ancestor.file_name().is_some_and(|name| name == "build"))?;
-    let candidate = build.parent()?.parent()?;
-    // Only a cross-compiled build inserts the target triple, and then the
-    // directory is named after it.
-    if let Some(triple) = env::var_os("TARGET")
-        && candidate.file_name() == Some(triple.as_os_str())
+/// A Unix pathname is a byte string, which is why the listing is never decoded
+/// as a whole: a name that is not valid UTF-8 still has to be found on disk, so
+/// that the directory holding it can be watched in its place.
+#[cfg(unix)]
+fn tracked_path(root: &Path, name: &[u8]) -> Option<PathBuf> {
+    use std::os::unix::ffi::OsStrExt;
+
+    (!name.is_empty()).then(|| root.join(OsStr::from_bytes(name)))
+}
+
+/// Resolve one pathname from the tracked listing against the repository root.
+///
+/// Windows holds a pathname as UTF-16 and Git reports it as UTF-8, so a name
+/// that does not survive that round trip cannot be addressed here at all.
+#[cfg(not(unix))]
+fn tracked_path(root: &Path, name: &[u8]) -> Option<PathBuf> {
+    (!name.is_empty())
+        .then(|| std::str::from_utf8(name).ok().map(|name| root.join(name)))
+        .flatten()
+}
+
+/// Return a pathname when a watch directive can carry it.
+///
+/// Three shapes cannot be carried, and each was measured against Cargo rather
+/// than assumed. Cargo decodes a directive as UTF-8 and silently drops a line
+/// it cannot decode, so a name that is not valid UTF-8 goes unwatched however
+/// it is written — including as raw bytes, which Cargo reads and discards. A
+/// directive occupies one line, so a name holding a line feed cannot be written
+/// at all. And Cargo strips a carriage return from the end of a line, so a name
+/// ending in one would be watched short, which Cargo then treats as permanently
+/// changed. A carriage return anywhere else survives.
+///
+/// [`watch_enclosing_directory`] stands in for all three.
+fn watchable_name(path: &Path) -> Option<&str> {
+    let name = path.to_str()?;
+    (!name.contains('\n') && !name.ends_with('\r')).then_some(name)
+}
+
+/// Watch the crate's own sources, for a tree Git cannot enumerate.
+///
+/// A packaged or vendored copy has no revision to go stale and no working tree
+/// to dirty, so the crate's sources and the lockfile behind the recorded
+/// dependency list are all that need watching. Both relative paths resolve
+/// against this crate's directory, which is what Cargo does with them.
+fn watch_crate_sources(workspace: Option<&Path>) {
+    println!("cargo:rerun-if-changed=Cargo.toml");
+    println!("cargo:rerun-if-changed=src");
+    if let Some(lockfile) = workspace
+        .map(|root| root.join("Cargo.lock"))
+        .filter(|lockfile| lockfile.is_file())
     {
-        return candidate.parent().map(Path::to_path_buf);
+        println!("cargo:rerun-if-changed={}", lockfile.display());
     }
-    Some(candidate.to_path_buf())
-}
-
-/// Return a Git exclude pathspec for a build output directory inside `root`.
-///
-/// Returns `None` when the output directory is outside the repository. The
-/// conventional in-tree `target/` is already ignored by `.gitignore`; this
-/// matters for a custom `CARGO_TARGET_DIR` placed inside the workspace.
-fn build_output_pathspec(root: &Path) -> Option<String> {
-    // Only called with a repository root, so it doubles as the tracked-file
-    // reference for rejecting a candidate that holds sources.
-    let build_output = build_output_dir(root, Some(root))?;
-    let canonical_root = fs::canonicalize(root).ok()?;
-    let relative = build_output.strip_prefix(&canonical_root).ok()?;
-    let mut path = String::new();
-    for component in relative.components() {
-        if !path.is_empty() {
-            path.push('/');
-        }
-        path.push_str(component.as_os_str().to_str()?);
-    }
-    if path.is_empty() {
-        return None;
-    }
-    // `literal` disables wildcard interpretation of a directory name Cargo's
-    // user chose, and `top` anchors it to the repository root rather than to
-    // any same-named directory deeper in the tree.
-    Some(format!(":(exclude,literal,top){path}"))
 }
 
 /// Return the workspace root when it is itself the root of a Git repository.
@@ -310,6 +296,10 @@ fn git_repository(root: &Path) -> Option<PathBuf> {
 ///
 /// `--git-path` is used rather than assuming `<root>/.git/...`, because a
 /// linked worktree stores `.git` as a file pointing elsewhere.
+///
+/// The loose ref file and `packed-refs` cover each other: only one of them
+/// holds the current branch, and packing the refs deletes the loose file the
+/// previous build was watching, which reruns this script.
 fn watch_git(root: &Path) {
     let mut paths = vec![
         "HEAD".to_owned(),
@@ -328,7 +318,7 @@ fn watch_git(root: &Path) {
         // `--git-path` answers relative to the repository, but Cargo resolves
         // a relative `rerun-if-changed` against this crate's directory. Emit
         // an absolute path so the watch lands on the real file.
-        println!("cargo:rerun-if-changed={}", root.join(resolved).display());
+        watch(&root.join(resolved));
     }
 }
 
@@ -342,27 +332,14 @@ fn source_revision(repository: Option<&Path>) -> String {
 
 /// Report whether the working tree matched its revision at build time.
 ///
-/// A build output directory inside the repository is excluded: it is written
-/// by this very build, and reporting the workspace as `modified` because Cargo
-/// created its own output would describe the build rather than the source.
+/// Nothing is excluded from `git status`. An exclusion is what manufactured a
+/// false `clean` twice, and there is nothing left to exclude: Cargo's build
+/// output is either ignored, in which case `git status` passes over it, or it
+/// is an unignored directory inside the repository, which is a working tree
+/// that really does not match its revision.
 fn source_state(repository: Option<&Path>) -> String {
     if let Some(root) = repository {
-        let mut arguments = vec![
-            "status".to_owned(),
-            "--porcelain".to_owned(),
-            "--untracked-files=normal".to_owned(),
-        ];
-        if let Some(excluded) = build_output_pathspec(root) {
-            arguments.push("--".to_owned());
-            arguments.push(".".to_owned());
-            arguments.push(excluded);
-        }
-        return match Command::new("git")
-            .current_dir(root)
-            // Refreshing the index would bump the mtime of a file this script
-            // watches, forcing one extra rerun after every fresh checkout.
-            .arg("--no-optional-locks")
-            .args(&arguments)
+        return match git_command(root, &["status", "--porcelain", "--untracked-files=normal"])
             .output()
         {
             Ok(output) if output.status.success() && output.stdout.is_empty() => "clean".to_owned(),
@@ -404,27 +381,46 @@ fn is_object_name(value: &str) -> bool {
     matches!(value.len(), 40 | 64) && value.chars().all(|character| character.is_ascii_hexdigit())
 }
 
+/// Build a Git invocation in a repository.
+///
+/// `--no-optional-locks` is passed to every Git call: refreshing the index
+/// would bump the mtime of a file this script watches, forcing one extra rerun
+/// after every fresh checkout.
+fn git_command(root: &Path, arguments: &[&str]) -> Command {
+    let mut command = Command::new("git");
+    command
+        .current_dir(root)
+        .arg("--no-optional-locks")
+        .args(arguments);
+    command
+}
+
 /// Run a Git command in a repository and return its trimmed output.
 fn git_output(root: &Path, arguments: &[&str]) -> Option<String> {
-    command_output_opt(Some(root), OsStr::new("git"), arguments)
+    trimmed_output(git_command(root, arguments))
+}
+
+/// Run a Git command in a repository and return its raw output bytes.
+///
+/// Used for `-z` listings. Nothing is trimmed or decoded: a pathname may begin
+/// or end with whitespace, and it need not be valid UTF-8 at all.
+fn git_listing(root: &Path, arguments: &[&str]) -> Option<Vec<u8>> {
+    let output = git_command(root, arguments).output().ok()?;
+    output.status.success().then_some(output.stdout)
 }
 
 /// Run a metadata command and map unavailable output to `unknown`.
 fn command_output(directory: Option<&Path>, program: &OsStr, arguments: &[&str]) -> String {
-    command_output_opt(directory, program, arguments).unwrap_or_else(|| "unknown".to_owned())
-}
-
-/// Run a metadata command, returning `None` when it fails or prints nothing.
-fn command_output_opt(
-    directory: Option<&Path>,
-    program: &OsStr,
-    arguments: &[&str],
-) -> Option<String> {
     let mut command = Command::new(program);
     command.args(arguments);
     if let Some(directory) = directory {
         command.current_dir(directory);
     }
+    trimmed_output(command).unwrap_or_else(|| "unknown".to_owned())
+}
+
+/// Run a command, returning `None` when it fails or prints nothing.
+fn trimmed_output(mut command: Command) -> Option<String> {
     command
         .output()
         .ok()

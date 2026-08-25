@@ -60,6 +60,11 @@ When Hydrax is built outside a Git checkout, `source_revision` can likewise be
 source state describes the tree at compilation time, not at execution time, and
 it describes the whole workspace rather than any single crate.
 
+Untracked changes include a Cargo output directory placed inside the repository
+without being ignored, which is what `CARGO_TARGET_DIR` does when pointed at an
+unignored path in the tree. A build whose provenance must read `clean` therefore
+keeps its output directory outside the workspace, or ignored within it.
+
 Consumers should treat `source_state` as an open vocabulary and accept an
 unrecognized value rather than failing, in line with the field-compatibility
 rule below.
