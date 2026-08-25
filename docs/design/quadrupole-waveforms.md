@@ -155,11 +155,17 @@ of [Finn and Evans (1990)](https://doi.org/10.1086/168497).
 
 ## Verification requirements
 
+A requirement that some response vanish is checked against the response the
+removed part of the source would produce on its own, not against an absolute
+strain or power. At astrophysical distances the whole signal lies many orders of
+magnitude below any absolute bound that is loose enough to be safe, so an
+absolute bound holds for an implementation that removes nothing.
+
 The time-domain implementation is accepted only if it demonstrates:
 
 - zero strain for an arbitrary spherical pulsation;
 - analytic amplitude and phase for a sinusoidal trace-free source;
-- inverse-distance scaling;
+- inverse-distance scaling of both polarizations;
 - invariance under addition of an isotropic trace;
 - mixing of the two polarizations through twice the angle of an observer
   rotation about the line of sight;

@@ -192,8 +192,28 @@ mod tests {
     /// correctly about the line of sight deviates by order unity.
     const MIXING_TOLERANCE: f64 = 1.0e-13;
 
+    /// Largest residual, as a fraction of the strain the isotropic part of the
+    /// source would produce on its own, that round-off alone can produce.
+    /// Measured round-off stays below `4.0e-14`, while an extraction that keeps
+    /// any of that part leaves a residual of order unity. The bound has to be
+    /// relative: the strains here are of order `1.0e-19`, so any absolute bound
+    /// loose enough to be safe is also loose enough to admit the whole signal.
+    const TRACE_REMOVAL_TOLERANCE: f64 = 1.0e-11;
+
+    /// Largest departure from exact inverse-distance scaling, as a fraction of
+    /// the nearer waveform's peak strain, that round-off alone can produce.
+    /// Doubling the distance halves the strain exactly in binary, so the
+    /// measured departure is zero; any other power of the distance departs by
+    /// order unity.
+    const DISTANCE_SCALING_TOLERANCE: f64 = 1.0e-14;
+
     fn maximum_absolute(values: &[f64]) -> f64 {
         values.iter().copied().map(f64::abs).fold(0.0, f64::max)
+    }
+
+    /// The `G/c⁴D` prefactor of the quadrupole formula.
+    fn strain_scale(distance_m: f64) -> f64 {
+        GRAVITATIONAL_CONSTANT_M3_KG_S2 / (SPEED_OF_LIGHT_M_S.powi(4) * distance_m)
     }
 
     fn dot(left: [f64; 3], right: [f64; 3]) -> f64 {
@@ -266,6 +286,30 @@ mod tests {
             .expect("valid source")
     }
 
+    /// An arbitrary spherical pulsation, with the peak magnitude of its second
+    /// derivative in kg m² s⁻². Two incommensurate tones keep the pulsation
+    /// from being a single frequency whose cancellation could be accidental.
+    fn spherical_pulsation() -> (QuadrupoleSeries, f64) {
+        let amplitude = 1.0e38;
+        let omega = 2.0 * PI * 700.0;
+        let sample_interval = 1.0 / 32_768.0;
+        let mut peak_second_derivative = 0.0_f64;
+        let samples = (0..256)
+            .map(|index| {
+                let phase = omega * index_as_f64(index) * sample_interval;
+                let overtone = 2.3 * phase + 0.9;
+                let radial = amplitude * (phase.cos() + 0.4 * overtone.sin());
+                let second_derivative = -amplitude
+                    * omega.powi(2)
+                    * (phase.cos() + 0.4 * 2.3_f64.powi(2) * overtone.sin());
+                peak_second_derivative = peak_second_derivative.max(second_derivative.abs());
+                SymmetricTensor3::isotropic(radial)
+            })
+            .collect();
+        let series = QuadrupoleSeries::new(0.0, sample_interval, samples).expect("valid source");
+        (series, peak_second_derivative)
+    }
+
     /// A source with all six components active and mutually offset in phase, so
     /// no observer sees a waveform that a rotation could leave unchanged.
     fn anisotropic_source() -> QuadrupoleSeries {
@@ -324,18 +368,37 @@ mod tests {
         }
     }
 
+    /// An arbitrary spherical pulsation radiates no strain.
+    ///
+    /// The bound is a fraction of the strain the pulsation would produce if the
+    /// two contractions of the plus polarization did not cancel, so an
+    /// extraction that keeps part of the isotropic source fails it. Bounding
+    /// the strain by an absolute constant instead does not test anything: at
+    /// astrophysical distances the whole signal is far below any constant loose
+    /// enough to be safe.
     #[test]
     fn spherical_motion_produces_zero_strain() {
-        let samples = (0..20)
-            .map(|index| SymmetricTensor3::isotropic((f64::from(index) * 0.2).sin()))
-            .collect();
-        let source = QuadrupoleSeries::new(0.0, 0.01, samples).expect("valid source");
-        let observer = Observer::new(DISTANCE_M, 0.7, -0.4).expect("valid observer");
-        let waveform = waveform_from_quadrupole(&source, observer, FiniteDifference::FivePoint)
-            .expect("enough samples");
+        let (source, peak_second_derivative) = spherical_pulsation();
+        let unremoved = 2.0 * strain_scale(DISTANCE_M) * peak_second_derivative;
 
-        assert!(maximum_absolute(waveform.h_plus()) < 1.0e-50);
-        assert!(maximum_absolute(waveform.h_cross()) < 1.0e-50);
+        for (inclination_rad, azimuth_rad) in [(0.0, 0.0), (0.7, -0.4), (1.9, 2.3), (2.9, 0.15)] {
+            let observer =
+                Observer::new(DISTANCE_M, inclination_rad, azimuth_rad).expect("valid observer");
+            let waveform = waveform_from_quadrupole(&source, observer, FiniteDifference::FivePoint)
+                .expect("enough samples");
+            let angles = format!("inclination {inclination_rad}, azimuth {azimuth_rad}");
+
+            let plus = maximum_absolute(waveform.h_plus()) / unremoved;
+            let cross = maximum_absolute(waveform.h_cross()) / unremoved;
+            assert!(
+                plus < TRACE_REMOVAL_TOLERANCE,
+                "plus residual {plus} of the unremoved strain at {angles}"
+            );
+            assert!(
+                cross < TRACE_REMOVAL_TOLERANCE,
+                "cross residual {cross} of the unremoved strain at {angles}"
+            );
+        }
     }
 
     #[test]
@@ -347,7 +410,7 @@ mod tests {
         let observer = Observer::new(DISTANCE_M, 0.0, 0.0).expect("valid observer");
         let waveform = waveform_from_quadrupole(&source, observer, FiniteDifference::FivePoint)
             .expect("enough samples");
-        let scale = GRAVITATIONAL_CONSTANT_M3_KG_S2 / (SPEED_OF_LIGHT_M_S.powi(4) * DISTANCE_M);
+        let scale = strain_scale(DISTANCE_M);
         let peak_amplitude = 2.0 * scale * amplitude * omega.powi(2);
 
         for (index, value) in waveform.h_plus().iter().enumerate() {
@@ -362,6 +425,11 @@ mod tests {
         assert!(maximum_absolute(waveform.h_cross()) < 1.0e-30);
     }
 
+    /// Both polarizations scale as the inverse of the distance.
+    ///
+    /// The observer is off both the pole and the diagonal so that neither
+    /// polarization vanishes, and the departure is measured against the nearer
+    /// waveform's peak strain rather than an absolute constant.
     #[test]
     fn strain_scales_inversely_with_distance() {
         let source = sinusoidal_quadrupole(1.0e38, 3000.0, 0.0, 1.0e-5, 32).expect("valid source");
@@ -377,9 +445,16 @@ mod tests {
             FiniteDifference::FivePoint,
         )
         .expect("enough samples");
+        assert_both_polarizations_present(&near);
+        let peak = maximum_absolute(near.h_plus()).max(maximum_absolute(near.h_cross()));
 
         for (near_value, far_value) in near.h_plus().iter().zip(far.h_plus()) {
-            assert!((near_value - 2.0 * far_value).abs() < 1.0e-35);
+            let error = (near_value - 2.0 * far_value).abs() / peak;
+            assert!(error < DISTANCE_SCALING_TOLERANCE, "plus error {error}");
+        }
+        for (near_value, far_value) in near.h_cross().iter().zip(far.h_cross()) {
+            let error = (near_value - 2.0 * far_value).abs() / peak;
+            assert!(error < DISTANCE_SCALING_TOLERANCE, "cross error {error}");
         }
     }
 
@@ -399,7 +474,7 @@ mod tests {
         let observer = Observer::new(DISTANCE_M, 0.0, 0.0).expect("valid observer");
         let waveform = waveform_from_quadrupole(&source, observer, FiniteDifference::FivePoint)
             .expect("enough samples");
-        let scale = GRAVITATIONAL_CONSTANT_M3_KG_S2 / (SPEED_OF_LIGHT_M_S.powi(4) * DISTANCE_M);
+        let scale = strain_scale(DISTANCE_M);
         let peak_amplitude = 2.0 * scale * amplitude * omega.powi(2);
 
         assert!(maximum_absolute(waveform.h_plus()) < 1.0e-30);
@@ -411,16 +486,27 @@ mod tests {
         }
     }
 
+    /// Adding an isotropic trace to the source leaves both polarizations alone.
+    ///
+    /// The added trace is three times the source amplitude and oscillates at
+    /// the same frequency, so the strain it would contribute is larger than the
+    /// waveform itself, and the difference is measured as a fraction of that
+    /// contribution.
     #[test]
     fn isotropic_trace_does_not_change_waveform() {
-        let source = sinusoidal_quadrupole(2.0, 4.0, 0.0, 0.01, 32).expect("valid source");
+        let amplitude = 1.0e38;
+        let omega = 2.0 * PI * 600.0;
+        let sample_interval = 1.0 / 32_768.0;
+        let source = sinusoidal_quadrupole(amplitude, omega, 0.0, sample_interval, 256)
+            .expect("valid source");
+        let trace_amplitude = 3.0 * amplitude;
         let traced_samples = source
             .samples()
             .iter()
-            .scan(0.0_f64, |phase, sample| {
-                let traced = *sample + SymmetricTensor3::isotropic(phase.cos());
-                *phase += 0.3;
-                Some(traced)
+            .enumerate()
+            .map(|(index, sample)| {
+                let phase = omega * index_as_f64(index) * sample_interval + 0.7;
+                *sample + SymmetricTensor3::isotropic(trace_amplitude * phase.cos())
             })
             .collect();
         let traced = QuadrupoleSeries::new(
@@ -434,12 +520,16 @@ mod tests {
             .expect("enough samples");
         let actual = waveform_from_quadrupole(&traced, observer, FiniteDifference::FivePoint)
             .expect("enough samples");
+        assert_both_polarizations_present(&expected);
+        let unremoved = 2.0 * strain_scale(DISTANCE_M) * trace_amplitude * omega.powi(2);
 
         for (expected, actual) in expected.h_plus().iter().zip(actual.h_plus()) {
-            assert!((expected - actual).abs() < 1.0e-45);
+            let error = (expected - actual).abs() / unremoved;
+            assert!(error < TRACE_REMOVAL_TOLERANCE, "plus error {error}");
         }
         for (expected, actual) in expected.h_cross().iter().zip(actual.h_cross()) {
-            assert!((expected - actual).abs() < 1.0e-45);
+            let error = (expected - actual).abs() / unremoved;
+            assert!(error < TRACE_REMOVAL_TOLERANCE, "cross error {error}");
         }
     }
 

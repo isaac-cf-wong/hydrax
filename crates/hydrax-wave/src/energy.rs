@@ -154,26 +154,52 @@ mod tests {
     use hydrax_core::{
         GRAVITATIONAL_CONSTANT_M3_KG_S2, SPEED_OF_LIGHT_M_S, SymmetricTensor3, index_as_f64,
     };
+    use std::f64::consts::PI;
 
+    /// Largest power or energy, as a fraction of what the isotropic part of the
+    /// source would radiate if it were kept, that round-off alone can produce.
+    /// The trace-free projection makes the measured fraction zero, while
+    /// dropping it makes it unity. The bound has to be relative: a spherical
+    /// pulsation of a realistic quadrupole amplitude radiates far below one
+    /// watt either way, so an absolute bound in watts holds without the
+    /// projection.
+    const TRACE_REMOVAL_TOLERANCE: f64 = 1.0e-11;
+
+    /// A spherical pulsation radiates no energy.
     #[test]
     fn isotropic_motion_radiates_no_energy() {
-        let samples = (0..16)
+        let amplitude = 1.0e38;
+        let omega = 2.0 * PI * 500.0;
+        let sample_interval = 1.0 / 32_768.0;
+        let samples = (0..64)
             .map(|index| {
-                let time = index_as_f64(index) * 0.01;
-                SymmetricTensor3::isotropic(time.sin())
+                let phase = omega * index_as_f64(index) * sample_interval;
+                SymmetricTensor3::isotropic(amplitude * phase.cos())
             })
             .collect();
-        let source = QuadrupoleSeries::new(0.0, 0.01, samples).expect("valid source");
+        let source = QuadrupoleSeries::new(0.0, sample_interval, samples).expect("valid source");
         let diagnostics =
             radiated_energy(&source, ThirdDerivativeStencil::SevenPoint).expect("enough samples");
 
+        // The isotropic third derivative contracts with itself three times over,
+        // so this is the power the pulsation radiates without the projection.
+        let luminosity_factor =
+            GRAVITATIONAL_CONSTANT_M3_KG_S2 / (5.0 * SPEED_OF_LIGHT_M_S.powi(5));
+        let unremoved_w = luminosity_factor * 3.0 * (amplitude * omega.powi(3)).powi(2);
+        let duration_s = index_as_f64(diagnostics.power_w().len() - 1) * sample_interval;
+
+        for power_w in diagnostics.power_w() {
+            let fraction = power_w.abs() / unremoved_w;
+            assert!(
+                fraction < TRACE_REMOVAL_TOLERANCE,
+                "power fraction {fraction}"
+            );
+        }
+        let fraction = diagnostics.total_energy_j().abs() / (unremoved_w * duration_s);
         assert!(
-            diagnostics
-                .power_w()
-                .iter()
-                .all(|power| power.abs() < f64::EPSILON)
+            fraction < TRACE_REMOVAL_TOLERANCE,
+            "energy fraction {fraction}"
         );
-        assert!(diagnostics.total_energy_j().abs() < f64::EPSILON);
     }
 
     #[test]
