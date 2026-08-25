@@ -1,6 +1,6 @@
 [package]
 name = "hydrax-io"
-description = "Provenance records and output serialization for Hydrax"
+description = "Run configuration, provenance records, and output serialization for Hydrax"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -16,6 +16,7 @@ readme = "README.md"
 [dependencies]
 serde.workspace = true
 serde_json.workspace = true
+toml.workspace = true
 
 [lints]
 workspace = true

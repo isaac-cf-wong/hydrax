@@ -46,6 +46,14 @@ The top-level `schema` value is `hydrax.provenance.v1`. Its fields are:
 | `run`      | Command name and the complete parsed runtime configuration, including explicit defaults and the provenance destination.                                            |
 | `output`   | Media type and the exact CSV schema identifier selected by the command.                                                                                            |
 
+The run configuration is recorded after resolution, so a setting given as a
+command-line flag, taken from a
+[run-configuration file](run-configuration.md), or left at its default is
+recorded the same way. Its keys are exactly the keys such a file accepts, so a
+recorded run can be replayed by handing its configuration back as a file. The
+path of the configuration file is not recorded: a path identifies a file that
+can change, while the settings it produced are recorded in full.
+
 `source_state` takes one of four values:
 
 | Value      | Meaning                                                                                                                                              |

@@ -41,13 +41,13 @@ requires at least axisymmetry.
 
 Hydrax is a Cargo workspace with a narrow boundary between its layers:
 
-| Crate                | Contents                                                     |
-| -------------------- | ------------------------------------------------------------ |
-| `crates/hydrax`      | Safe public API; re-exports the layers below                 |
-| `crates/hydrax-cli`  | The `hydrax` binary                                          |
-| `crates/hydrax-core` | Units, symmetric tensors, numerical conventions, error types |
-| `crates/hydrax-wave` | Quadrupole sources, polarizations, spectra, radiated energy  |
-| `crates/hydrax-io`   | Provenance records and output serialization                  |
+| Crate                | Contents                                                    |
+| -------------------- | ----------------------------------------------------------- |
+| `crates/hydrax`      | Safe public API; re-exports the layers below                |
+| `crates/hydrax-cli`  | The `hydrax` binary                                         |
+| `crates/hydrax-core` | SI and geometrized units, tensors, conventions, error types |
+| `crates/hydrax-wave` | Quadrupole sources, polarizations, spectra, radiated energy |
+| `crates/hydrax-io`   | Run configuration, provenance, and output serialization     |
 
 Depend on `hydrax` rather than on a layer directly: the internal boundaries
 will move as the physics grows, while the facade stays stable. Every crate
@@ -94,11 +94,31 @@ The sidecar includes its schema version, the CSV schema identifier, the Hydrax
 version and source revision, compiler and target information, enabled features,
 resolved dependency versions, floating-point precision, and every demo option.
 
+Collect the settings of a run in a TOML file instead of on the command line:
+
+```toml
+# galactic.toml
+duration_s = 0.5
+frequency_hz = 650.0
+distance_kpc = 8.5
+output = "spectrum"
+window = "tukey"
+tukey_alpha = 0.25
+```
+
+```shell
+cargo run -- demo --config galactic.toml > spectrum.csv
+```
+
+A command-line flag overrides one setting of a configuration file without
+restating the rest, and an unrecognized key is an error rather than a silently
+ignored setting.
+
 The public library API accepts SI units explicitly:
 
 ```rust
 use hydrax::{
-    FiniteDifference, Observer, PARSEC_M, sinusoidal_quadrupole,
+    FiniteDifference, Observer, kiloparsecs_to_m, sinusoidal_quadrupole,
     waveform_from_quadrupole,
 };
 
@@ -109,7 +129,7 @@ let source = sinusoidal_quadrupole(
     1.0 / 16_384.0,
     1024,
 )?;
-let observer = Observer::new(10_000.0 * PARSEC_M, 0.0, 0.0)?;
+let observer = Observer::new(kiloparsecs_to_m(10.0), 0.0, 0.0)?;
 let waveform = waveform_from_quadrupole(
     &source,
     observer,
@@ -127,9 +147,16 @@ assert!(energy.total_energy_j() > 0.0);
 # Ok::<(), hydrax::WaveformError>(())
 ```
 
-The conventions and validity limits are documented in the
-[quadrupole waveform design](docs/design/quadrupole-waveforms.md). The stable
-column definitions and provenance fields are documented in
+Geometrized conversions turn those SI values into the `G = c = 1` system the
+relativistic milestones will use internally, and back again.
+
+The unit systems and physical constants are documented in
+[units and numerical conventions](docs/design/units-and-conventions.md). The
+conventions and validity limits are documented in the
+[quadrupole waveform design](docs/design/quadrupole-waveforms.md). The settings
+a run accepts are documented in
+[run configuration files](docs/design/run-configuration.md), and the stable
+column definitions and provenance fields in
 [output formats and provenance](docs/design/output-formats.md).
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the complete development workflow.

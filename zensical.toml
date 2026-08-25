@@ -12,7 +12,10 @@ nav = [
     { "Overview" = "api/index.md" },
   ] },
   { "Design" = [
+    { "Units and conventions" = "design/units-and-conventions.md" },
     { "Quadrupole waveforms" = "design/quadrupole-waveforms.md" },
+    { "Run configuration" = "design/run-configuration.md" },
+    { "Output formats and provenance" = "design/output-formats.md" },
   ] },
   { "Contributing" = "contributing.md" },
   { "Security" = "security.md" },
