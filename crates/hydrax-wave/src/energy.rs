@@ -106,7 +106,7 @@ pub fn radiated_energy(
         .collect::<Vec<_>>();
     let total_energy_j = power_w
         .windows(2)
-        .map(|pair| 0.5 * (pair[0] + pair[1]) * quadrupole.sample_interval_s())
+        .map(|pair| f64::midpoint(pair[0], pair[1]) * quadrupole.sample_interval_s())
         .sum();
 
     Ok(EnergyDiagnostics {
