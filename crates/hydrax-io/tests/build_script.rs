@@ -14,6 +14,11 @@
 //! Nothing here may run a bare `git status` against a fixture: that refreshes
 //! the index the script watches and costs one rerun, which would look like the
 //! defect these checks exist to catch.
+//!
+//! The record is read as bytes throughout, because a pathname is a byte string:
+//! the checks below deliberately track files whose names are not valid UTF-8 or
+//! hold a line break, and decoding the record as text would fail on the first
+//! of them.
 
 use std::{
     fs,
@@ -70,8 +75,7 @@ impl Workspace {
             &[],
         );
         workspace.git(&["init", "--quiet", "--initial-branch=main"]);
-        workspace.git(&["add", "--all"]);
-        workspace.commit("Add the fixture workspace");
+        workspace.track_all("Add the fixture workspace");
         workspace
     }
 
@@ -87,6 +91,29 @@ impl Workspace {
             fs::create_dir_all(parent).expect("fixture directory is creatable");
         }
         fs::write(&path, contents).expect("fixture file is writable");
+    }
+
+    /// Write one file whose name is an arbitrary byte string, and track it.
+    ///
+    /// The name is given as bytes because these are exactly the names that
+    /// cannot be spelled as text: a byte that is not valid UTF-8, a line break,
+    /// a trailing carriage return.
+    #[cfg(unix)]
+    fn write_bytes(&self, name: &[u8], contents: &str) -> PathBuf {
+        use std::{ffi::OsStr, os::unix::ffi::OsStrExt};
+
+        let path = self.root.join(OsStr::from_bytes(name));
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).expect("fixture directory is creatable");
+        }
+        fs::write(&path, contents).expect("fixture file is writable");
+        path
+    }
+
+    /// Stage and commit everything in the fixture, as a later edit needs.
+    fn track_all(&self, message: &str) {
+        self.git(&["add", "--all"]);
+        self.commit(message);
     }
 
     /// Build the fixture and read Cargo's record of the build script's run.
@@ -167,8 +194,8 @@ fn run(mut command: Command, program: &str) {
 
 /// Cargo's record of one run of the build script.
 struct Record {
-    /// Every directive the script printed.
-    directives: String,
+    /// Every directive the script printed, verbatim.
+    directives: Vec<u8>,
     /// When the script wrote them.
     written: SystemTime,
 }
@@ -193,44 +220,81 @@ impl Record {
         let written = fs::metadata(&path)
             .and_then(|metadata| metadata.modified())
             .expect("the record has a modification time");
-        let directives = fs::read_to_string(&path).expect("the record is readable");
+        let directives = fs::read(&path).expect("the record is readable");
         Self {
             directives,
             written,
         }
     }
 
+    /// Lines of the record.
+    fn lines(&self) -> impl Iterator<Item = &[u8]> {
+        self.directives.split(|byte| *byte == b'\n')
+    }
+
     /// Value the script exported under `name`.
     fn value(&self, name: &str) -> &str {
         let prefix = format!("cargo:rustc-env={name}=");
-        self.directives
-            .lines()
-            .find_map(|line| line.strip_prefix(&prefix))
+        self.lines()
+            .find_map(|line| line.strip_prefix(prefix.as_bytes()))
+            .and_then(|value| std::str::from_utf8(value).ok())
             .unwrap_or_else(|| panic!("the script exported {name}"))
     }
 
-    /// Paths the script asked Cargo to watch.
-    fn watched(&self) -> impl Iterator<Item = &Path> {
-        self.directives
-            .lines()
-            .filter_map(|line| line.strip_prefix("cargo:rerun-if-changed="))
-            .map(Path::new)
+    /// Pathnames the script asked Cargo to watch, as it wrote them.
+    fn watched(&self) -> impl Iterator<Item = &[u8]> {
+        self.lines()
+            .filter_map(|line| line.strip_prefix(b"cargo:rerun-if-changed=".as_slice()))
+    }
+
+    /// How many times the script asked Cargo to watch exactly `path`.
+    fn watch_count(&self, path: &Path) -> usize {
+        self.watched()
+            .filter(|watched| path_of(watched).is_some_and(|watched| watched == path))
+            .count()
     }
 
     /// Whether the script asked Cargo to watch exactly `path`.
     fn watches(&self, path: &Path) -> bool {
-        self.watched().any(|watched| watched == path)
+        self.watch_count(path) > 0
     }
 
     /// Whether the script asked Cargo to watch anything inside `directory`.
     fn watches_inside(&self, directory: &Path) -> bool {
-        self.watched().any(|watched| watched.starts_with(directory))
+        self.watched()
+            .filter_map(path_of)
+            .any(|watched| watched.starts_with(directory))
+    }
+
+    /// Whether the script warned that it could not watch something.
+    fn warned(&self) -> bool {
+        self.lines()
+            .any(|line| line.starts_with(b"cargo:warning=".as_slice()))
     }
 
     /// Whether the script ran again after `previous` was recorded.
     fn reran_since(&self, previous: &Self) -> bool {
         self.written != previous.written
     }
+}
+
+/// The path a directive names, read back from the bytes the script wrote.
+///
+/// A Unix pathname is a byte string, so the round trip is exact — which is what
+/// lets a check assert that a name Git reports verbatim is watched verbatim.
+#[cfg(unix)]
+fn path_of(name: &[u8]) -> Option<PathBuf> {
+    use std::{ffi::OsStr, os::unix::ffi::OsStrExt};
+
+    (!name.is_empty()).then(|| PathBuf::from(OsStr::from_bytes(name)))
+}
+
+/// The path a directive names, read back from the bytes the script wrote.
+#[cfg(not(unix))]
+fn path_of(name: &[u8]) -> Option<PathBuf> {
+    (!name.is_empty())
+        .then(|| std::str::from_utf8(name).ok().map(PathBuf::from))
+        .flatten()
 }
 
 /// Host target triple, which Cargo also uses as a layout directory name.
@@ -520,6 +584,185 @@ fn a_deleted_tracked_file_reruns_the_script_exactly_once() {
     assert!(
         !third.reran_since(&second),
         "the script stayed dirty after the deletion"
+    );
+
+    workspace.remove();
+}
+
+/// One pathname that is not valid UTF-8 does not empty the rest of the watch set.
+///
+/// The tracked listing is a stream of byte strings. Decoding it as text fails
+/// on the first such name, and falling back to the crate's own sources over one
+/// filename would leave every other tracked file able to change the reported
+/// state unnoticed. The awkward file itself cannot be named in a directive —
+/// Cargo decodes directives as UTF-8 and drops what it cannot decode, measured
+/// directly — so the directory holding it is watched instead.
+#[cfg(unix)]
+#[test]
+fn a_non_utf8_pathname_costs_only_itself() {
+    let workspace = Workspace::create("non-utf8-name");
+    let awkward = workspace.write_bytes(b"docs/\xffname.md", "A name that is not text.\n");
+    workspace.track_all("Add a file whose name is not UTF-8");
+    let target = workspace.path("target");
+
+    let first = workspace.build(&target, &[]);
+    assert_eq!(first.value("HYDRAX_SOURCE_STATE"), "clean");
+    assert!(
+        first.watches(&workspace.path("README.md")),
+        "one awkward name emptied the rest of the watch set"
+    );
+    assert!(
+        first.watches(&workspace.path("crates/hydrax-io/src/lib.rs")),
+        "one awkward name emptied the rest of the watch set"
+    );
+    assert!(
+        first.watches(&workspace.path("docs")),
+        "the directory holding the awkward name is not watched"
+    );
+    assert!(!first.warned(), "nothing had to be given up");
+
+    let second = workspace.build(&target, &[]);
+    assert!(
+        !second.reran_since(&first),
+        "the script reran with nothing changed"
+    );
+
+    fs::write(&awkward, "Edited.\n").expect("the tracked file is writable");
+    let third = workspace.build(&target, &[]);
+    assert!(
+        third.reran_since(&second),
+        "an edit to the awkward name did not rerun the script"
+    );
+    assert_eq!(third.value("HYDRAX_SOURCE_STATE"), "modified");
+
+    workspace.remove();
+}
+
+/// A pathname a directive cannot carry is covered by the directory holding it.
+///
+/// Two shapes cannot be carried: a line feed ends the directive, and Cargo
+/// strips a carriage return from the end of a line, leaving a path it cannot
+/// stat. Cargo walks a watched directory recursively, so watching the directory
+/// keeps an edit to such a file visible — where discarding the name outright
+/// left the file able to change the reported state in silence.
+#[cfg(unix)]
+#[test]
+fn a_pathname_no_directive_can_carry_is_covered_by_its_directory() {
+    let workspace = Workspace::create("unwritable-names");
+    let broken = workspace.write_bytes(b"docs/line\nbreak.md", "A name holding a line feed.\n");
+    let trailing = workspace.write_bytes(b"docs/trailing\r", "A name ending in a return.\n");
+    workspace.track_all("Add files whose names a directive cannot carry");
+    let target = workspace.path("target");
+    let directory = workspace.path("docs");
+
+    let first = workspace.build(&target, &[]);
+    assert_eq!(first.value("HYDRAX_SOURCE_STATE"), "clean");
+    assert!(
+        !first.watches(&broken),
+        "a line feed cannot be written into a directive"
+    );
+    assert!(
+        !first.watches(&trailing),
+        "Cargo strips a carriage return from the end of a line"
+    );
+    assert_eq!(
+        first.watch_count(&directory),
+        1,
+        "the directory holding them is watched exactly once"
+    );
+    assert!(!first.warned(), "the directory stood in for both names");
+
+    let second = workspace.build(&target, &[]);
+    assert!(
+        !second.reran_since(&first),
+        "watching a directory left the script permanently dirty"
+    );
+
+    fs::write(&broken, "Edited.\n").expect("the tracked file is writable");
+    let third = workspace.build(&target, &[]);
+    assert!(
+        third.reran_since(&second),
+        "an edit to an unwritable name did not rerun the script"
+    );
+    assert_eq!(third.value("HYDRAX_SOURCE_STATE"), "modified");
+
+    workspace.remove();
+}
+
+/// A carriage return anywhere but the end of a pathname needs no stand-in.
+///
+/// Cargo splits directives on line feeds and only trims a trailing return, so
+/// such a name is watched as it is. Refusing every return would send a file to
+/// a directory watch that does not need one.
+#[cfg(unix)]
+#[test]
+fn a_carriage_return_inside_a_pathname_is_watched_directly() {
+    let workspace = Workspace::create("interior-return");
+    let interior = workspace.write_bytes(b"docs/car\rriage.md", "A name holding one inside.\n");
+    workspace.track_all("Add a file whose name holds a carriage return");
+    let target = workspace.path("target");
+
+    let first = workspace.build(&target, &[]);
+    assert!(
+        first.watches(&interior),
+        "the name was not watched as it is"
+    );
+    assert_eq!(first.value("HYDRAX_SOURCE_STATE"), "clean");
+
+    let second = workspace.build(&target, &[]);
+    assert!(
+        !second.reran_since(&first),
+        "the script reran with nothing changed"
+    );
+
+    fs::write(&interior, "Edited.\n").expect("the tracked file is writable");
+    let third = workspace.build(&target, &[]);
+    assert!(
+        third.reran_since(&second),
+        "an edit to the name did not rerun the script"
+    );
+    assert_eq!(third.value("HYDRAX_SOURCE_STATE"), "modified");
+
+    workspace.remove();
+}
+
+/// A tracked file that cannot be watched at all is reported, not dropped.
+///
+/// With the output directory inside the repository, the only directory that
+/// could stand in for a file at the repository root is the root itself, and
+/// watching that would walk Cargo's output and rerun the script on every build.
+/// The file is then left out — but said out loud, because the alternative is a
+/// source state that quietly goes stale.
+#[cfg(unix)]
+#[test]
+fn a_pathname_nothing_can_cover_is_reported_rather_than_dropped() {
+    let workspace = Workspace::create("unwatchable-name");
+    workspace.write_bytes(
+        b"line\nbreak.md",
+        "A name holding a line feed, at the root.\n",
+    );
+    workspace.track_all("Add an unwritable name at the repository root");
+    let target = workspace.path("target");
+
+    let first = workspace.build(&target, &[]);
+    assert!(
+        first.warned(),
+        "a tracked file left out of the watch set was not reported"
+    );
+    assert!(
+        first.watches(&workspace.path("README.md")),
+        "the rest of the listing is still watched"
+    );
+    assert!(
+        !first.watches_inside(&target),
+        "nothing inside the output directory is watched"
+    );
+    assert_eq!(first.value("HYDRAX_SOURCE_STATE"), "clean");
+
+    let second = workspace.build(&target, &[]);
+    assert!(
+        !second.reran_since(&first),
+        "the script reran with nothing changed"
     );
 
     workspace.remove();

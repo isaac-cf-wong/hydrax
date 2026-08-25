@@ -6,6 +6,7 @@
 //! `unknown`.
 
 use std::{
+    collections::HashSet,
     env,
     ffi::OsStr,
     fs,
@@ -92,46 +93,175 @@ fn is_hydrax_workspace(directory: &Path) -> bool {
 /// directory placed inside the repository and not ignored genuinely is a dirty
 /// tree.
 ///
-/// The one thing not watched is a file Git does not track yet. Staging it
-/// writes the index, which [`watch_git`] watches, and a new file cannot take
+/// The listing is handled as bytes, one entry at a time. A pathname is a byte
+/// string, not text, and a name that is not valid UTF-8 — or that no directive
+/// can carry — must cost that one name rather than the whole set: falling back
+/// to the crate's own sources over a single awkward filename would leave every
+/// other tracked file able to change the reported state without this script
+/// running again.
+///
+/// The one thing not watched at all is a file Git does not track yet. Staging
+/// it writes the index, which [`watch_git`] watches, and a new file cannot take
 /// part in a build without a tracked manifest or module naming it.
 fn watch_tracked_files(root: &Path) {
     let Some(listing) = git_listing(root, &["ls-files", "-z"]) else {
         watch_crate_sources(Some(root));
         return;
     };
+    let output = build_output();
+    let mut enclosing = HashSet::new();
     let mut watched = false;
-    for path in listing.split('\0').filter(|path| !path.is_empty()) {
-        // A `cargo:` directive occupies a single line, so a path holding a line
-        // break cannot be expressed at all.
-        if !path.contains(['\n', '\r']) {
-            watched |= watch(&root.join(path));
+    let mut unwatched = 0_usize;
+    for entry in listing.split(|byte| *byte == 0) {
+        let Some(path) = tracked_path(root, entry) else {
+            // Only reachable where a pathname has to be text: a name Git
+            // reports that the platform cannot address is left to the warning
+            // below rather than silently dropped.
+            if !entry.is_empty() {
+                unwatched += 1;
+            }
+            continue;
+        };
+        let Ok(metadata) = fs::metadata(&path) else {
+            // Cargo treats a path it cannot stat as permanently changed, so a
+            // tracked file that is gone from the working tree stays out of the
+            // set. Its deletion is still seen once, because the build before it
+            // was watching the file.
+            continue;
+        };
+        if metadata.is_dir() {
+            // Only a submodule is reported as a tracked directory. Cargo walks
+            // a watched directory recursively, which would pull the submodule's
+            // own build output in and rerun this script on every build.
+            continue;
+        }
+        if emit_watch(&path)
+            || watch_enclosing_directory(&path, root, output.as_deref(), &mut enclosing)
+        {
+            watched = true;
+        } else {
+            unwatched += 1;
         }
     }
     if !watched {
         watch_crate_sources(Some(root));
     }
+    if unwatched > 0 {
+        // Staying quiet would leave a tracked file able to change the reported
+        // source state without this script running again.
+        println!(
+            "cargo:warning=hydrax provenance: {unwatched} tracked file(s) have names no build \
+             script directive can carry, and no directory above them could stand in; an edit to \
+             one of them may leave the recorded source state stale"
+        );
+    }
 }
 
-/// Ask Cargo to watch one absolute path, and report whether it did.
+/// Ask Cargo to watch one file, and report whether it did.
 ///
 /// Cargo treats a watched path it cannot stat as permanently changed, so an
-/// absent one reruns this script on every build. Asking the same question
-/// Cargo will — metadata through any symlink — keeps that out of the watch
-/// set, at no cost: the build before a path vanished was watching it, and a
-/// watched path disappearing reruns the script once. Both cases arise here, a
-/// tracked file deleted from the working tree and `packed-refs` in a
-/// repository whose refs are all still loose.
-///
-/// A directory is refused as well, for its own reason: Cargo walks a watched
-/// directory recursively, and the only directory Git reports as a tracked path
-/// is a submodule, whose build output would be walked along with its sources.
+/// absent one reruns this script on every build. Asking the same question Cargo
+/// will — metadata through any symlink — keeps that out of the watch set, at no
+/// cost: the build before a path vanished was watching it, and a watched path
+/// disappearing reruns the script once. Both cases arise here, a tracked file
+/// deleted from the working tree and `packed-refs` in a repository whose refs
+/// are all still loose.
 fn watch(path: &Path) -> bool {
-    let watchable = fs::metadata(path).is_ok_and(|metadata| !metadata.is_dir());
-    if watchable {
-        println!("cargo:rerun-if-changed={}", path.display());
+    fs::metadata(path).is_ok_and(|metadata| !metadata.is_dir()) && emit_watch(path)
+}
+
+/// Watch the nearest directory above `path` that a directive can name.
+///
+/// Cargo walks a watched directory recursively, so watching the directory that
+/// holds a file covers the file too — the only way to watch one whose own name
+/// cannot be written. A directory holding Cargo's build output is refused: the
+/// build writes there, so watching it would rerun this script every time. Every
+/// directory further up holds that output as well, which ends the walk.
+fn watch_enclosing_directory(
+    path: &Path,
+    root: &Path,
+    output: Option<&Path>,
+    watched: &mut HashSet<PathBuf>,
+) -> bool {
+    for directory in path.ancestors().skip(1) {
+        // The repository root is the outermost directory worth watching; above
+        // it lies the rest of the machine.
+        if !directory.starts_with(root) {
+            return false;
+        }
+        if output.is_some_and(|output| output.starts_with(directory)) {
+            return false;
+        }
+        if watched.contains(directory) {
+            // Already watched, for an earlier file with an equally awkward name.
+            return true;
+        }
+        if emit_watch(directory) {
+            watched.insert(directory.to_path_buf());
+            return true;
+        }
     }
-    watchable
+    false
+}
+
+/// Locate Cargo's build output, for the one decision that needs to know.
+///
+/// This is not the output-root detection the watch set used to rest on: no
+/// marker file, layout shape or directory name is consulted, and nothing is
+/// excluded from `git status`. `OUT_DIR` is simply somewhere inside the output,
+/// which is all it takes to refuse to watch a directory that contains it.
+fn build_output() -> Option<PathBuf> {
+    let out_dir = PathBuf::from(env::var_os("OUT_DIR")?);
+    Some(fs::canonicalize(&out_dir).unwrap_or(out_dir))
+}
+
+/// Write one watch directive, and report whether the path could be written.
+fn emit_watch(path: &Path) -> bool {
+    let Some(name) = watchable_name(path) else {
+        return false;
+    };
+    println!("cargo:rerun-if-changed={name}");
+    true
+}
+
+/// Resolve one pathname from the tracked listing against the repository root.
+///
+/// A Unix pathname is a byte string, which is why the listing is never decoded
+/// as a whole: a name that is not valid UTF-8 still has to be found on disk, so
+/// that the directory holding it can be watched in its place.
+#[cfg(unix)]
+fn tracked_path(root: &Path, name: &[u8]) -> Option<PathBuf> {
+    use std::os::unix::ffi::OsStrExt;
+
+    (!name.is_empty()).then(|| root.join(OsStr::from_bytes(name)))
+}
+
+/// Resolve one pathname from the tracked listing against the repository root.
+///
+/// Windows holds a pathname as UTF-16 and Git reports it as UTF-8, so a name
+/// that does not survive that round trip cannot be addressed here at all.
+#[cfg(not(unix))]
+fn tracked_path(root: &Path, name: &[u8]) -> Option<PathBuf> {
+    (!name.is_empty())
+        .then(|| std::str::from_utf8(name).ok().map(|name| root.join(name)))
+        .flatten()
+}
+
+/// Return a pathname when a watch directive can carry it.
+///
+/// Three shapes cannot be carried, and each was measured against Cargo rather
+/// than assumed. Cargo decodes a directive as UTF-8 and silently drops a line
+/// it cannot decode, so a name that is not valid UTF-8 goes unwatched however
+/// it is written — including as raw bytes, which Cargo reads and discards. A
+/// directive occupies one line, so a name holding a line feed cannot be written
+/// at all. And Cargo strips a carriage return from the end of a line, so a name
+/// ending in one would be watched short, which Cargo then treats as permanently
+/// changed. A carriage return anywhere else survives.
+///
+/// [`watch_enclosing_directory`] stands in for all three.
+fn watchable_name(path: &Path) -> Option<&str> {
+    let name = path.to_str()?;
+    (!name.contains('\n') && !name.ends_with('\r')).then_some(name)
 }
 
 /// Watch the crate's own sources, for a tree Git cannot enumerate.
@@ -270,17 +400,13 @@ fn git_output(root: &Path, arguments: &[&str]) -> Option<String> {
     trimmed_output(git_command(root, arguments))
 }
 
-/// Run a Git command in a repository and return its output verbatim.
+/// Run a Git command in a repository and return its raw output bytes.
 ///
-/// Used for `-z` listings, where trimming would corrupt a path whose name
-/// begins or ends with whitespace.
-fn git_listing(root: &Path, arguments: &[&str]) -> Option<String> {
+/// Used for `-z` listings. Nothing is trimmed or decoded: a pathname may begin
+/// or end with whitespace, and it need not be valid UTF-8 at all.
+fn git_listing(root: &Path, arguments: &[&str]) -> Option<Vec<u8>> {
     let output = git_command(root, arguments).output().ok()?;
-    output
-        .status
-        .success()
-        .then(|| String::from_utf8(output.stdout).ok())
-        .flatten()
+    output.status.success().then_some(output.stdout)
 }
 
 /// Run a metadata command and map unavailable output to `unknown`.
