@@ -56,9 +56,22 @@ h_\times &= \frac{2G}{c^4D}p_i q_j\ddot Q_{ij}.
 \end{aligned}
 \]
 
-Changing the handedness or rotating \(\mathbf p\) and \(\mathbf q\) changes the
-polarization convention but not the physical tensor field. The convention must
-therefore accompany exported data.
+Writing \(\mathbf n=(\sin\theta\cos\phi,\;\sin\theta\sin\phi,\;\cos\theta)\)
+for the unit line of sight, \((\mathbf p,\mathbf q,\mathbf n)\) is a right-handed
+orthonormal triad with \(\mathbf p\times\mathbf q=\mathbf n\), so both
+polarization tensors are transverse. Turning the observer through \(\psi\) about
+the line of sight therefore mixes the polarizations as a rotation through
+\(2\psi\),
+
+\[
+\begin{pmatrix}h_+\\h_\times\end{pmatrix}\mapsto
+\begin{pmatrix}\cos 2\psi & \sin 2\psi\\-\sin 2\psi & \cos 2\psi\end{pmatrix}
+\begin{pmatrix}h_+\\h_\times\end{pmatrix},
+\]
+
+which leaves \(h_+^2+h_\times^2\) unchanged. Changing the handedness or rotating
+\(\mathbf p\) and \(\mathbf q\) changes the polarization convention but not the
+physical tensor field. The convention must therefore accompany exported data.
 
 ## Numerical differentiation
 
@@ -148,6 +161,8 @@ The time-domain implementation is accepted only if it demonstrates:
 - analytic amplitude and phase for a sinusoidal trace-free source;
 - inverse-distance scaling;
 - invariance under addition of an isotropic trace;
+- mixing of the two polarizations through twice the angle of an observer
+  rotation about the line of sight;
 - the advertised finite-difference convergence order;
 - rejection of non-finite samples and invalid observer distances;
 - exact discrete-transform normalization for DC and bin-centered sinusoids;
