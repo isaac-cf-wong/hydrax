@@ -76,11 +76,31 @@ the same terms as a value from a flag.
 The `run.configuration` object of a
 [provenance sidecar](output-formats.md) is the fully resolved configuration:
 every setting with its explicit value, whether it came from a flag, a file, or
-a default. Its keys are exactly the keys accepted in a configuration file, so a
-recorded run can be replayed by handing its recorded configuration back as a
-file.
+a default. Its keys are exactly the keys accepted in a configuration file.
 
-The path of the configuration file is deliberately not recorded. A path
+A sidecar is nonetheless **not** a configuration file, and `--config` rejects
+one. The sidecar is JSON, and it wraps that configuration in an envelope of
+software, build, and output records that describe how the run was produced
+rather than what to run. Replaying a recorded run therefore means extracting
+one object from it:
+
+```shell
+jq -r '.run.configuration | to_entries[] | "\(.key) = \(.value | tojson)"' \
+    recorded.provenance.json > replay.toml
+hydrax demo --config replay.toml --provenance replayed.provenance.json
+```
+
+Because the recorded keys are the accepted keys, that object needs no renaming
+and no filtering: converting it from JSON to TOML is the whole of the
+extraction, and the resulting file resolves to the run that was recorded. The
+one-liner above is the whole conversion because a configuration is a flat
+object of numbers and strings, and TOML and JSON spell both the same way. Its
+`provenance` key names the sidecar the recorded run wrote, so a replay that
+should keep the original record passes `--provenance` to redirect it, as above.
+That key is always present and never null in a sidecar, because a sidecar
+exists only where one was asked for.
+
+The path of the configuration _file_ is deliberately not recorded. A path
 identifies a file that can change or disappear, while the resolved settings it
 produced are recorded in full and cannot.
 
@@ -96,6 +116,9 @@ The configuration layer is accepted only if it demonstrates:
   actually applies;
 - rejection of an unknown key by name, of a value of the wrong type, of a
   malformed file, and of a missing file, each naming the file;
-- validation of a configured setting on the same terms as a flag; and
-- a recorded configuration reloading as a configuration file and resolving to
-  the run it was recorded from.
+- validation of a configured setting on the same terms as a flag;
+- rejection of a provenance sidecar handed to `--config`, since a sidecar is
+  not a configuration file; and
+- replay of a recorded run from the configuration extracted out of the sidecar
+  the binary actually wrote, reproducing the recorded output exactly and
+  recording the same settings again.

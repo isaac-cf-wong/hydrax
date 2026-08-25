@@ -50,9 +50,11 @@ The run configuration is recorded after resolution, so a setting given as a
 command-line flag, taken from a
 [run-configuration file](run-configuration.md), or left at its default is
 recorded the same way. Its keys are exactly the keys such a file accepts, so a
-recorded run can be replayed by handing its configuration back as a file. The
-path of the configuration file is not recorded: a path identifies a file that
-can change, while the settings it produced are recorded in full.
+recorded run can be replayed by extracting the `run.configuration` object and
+writing it as a configuration file. The sidecar itself is not one: it is JSON,
+and it wraps that object in the envelope described above. The path of the
+configuration file is not recorded: a path identifies a file that can change,
+while the settings it produced are recorded in full.
 
 `source_state` takes one of four values:
 

@@ -527,9 +527,13 @@ mod tests {
     }
 
     #[test]
-    fn a_recorded_configuration_is_a_configuration_file() {
-        // The provenance record and the configuration file share one key set,
-        // so a recorded run can be replayed by handing the record back.
+    fn the_recorded_setting_keys_are_the_configuration_file_keys() {
+        // The narrow property the replay contract rests on: the keys a
+        // configuration is recorded under are the keys a configuration file
+        // accepts, so extracting a recorded configuration needs no renaming.
+        // A sidecar is not itself a configuration file — it is JSON, and it
+        // wraps this object in an envelope — so the replay of an actual
+        // sidecar is tested end to end in `tests/cli.rs` instead.
         let expected = distinctive_configuration();
         let directory = std::env::temp_dir().join(format!(
             "hydrax-cli-configuration-{}-recorded",
@@ -543,8 +547,8 @@ mod tests {
         )
         .expect("configuration file is writable");
 
-        let reloaded: DemoSettings =
-            read_configuration(&path).expect("a recorded configuration is a valid file");
+        let reloaded: DemoSettings = read_configuration(&path)
+            .expect("a recorded configuration is accepted under its own keys");
 
         assert_eq!(reloaded.resolve(), expected);
 
