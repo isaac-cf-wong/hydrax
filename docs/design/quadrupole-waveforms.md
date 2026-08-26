@@ -179,5 +179,7 @@ The time-domain implementation is accepted only if it demonstrates:
 - trace invariance and zero energy for spherical motion; and
 - the advertised third-derivative convergence order.
 
-The versioned file schemas and provenance record are specified in
+The unit system and physical constants these formulas use are specified in
+[units and numerical conventions](units-and-conventions.md). The versioned file
+schemas and provenance record are specified in
 [output formats and provenance](output-formats.md).
