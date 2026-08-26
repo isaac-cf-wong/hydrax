@@ -1,0 +1,39 @@
+[package]
+name = "hydrax-kernels-sys"
+description = "Versioned C ABI bindings to the Hydrax numerical kernels"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+keywords.workspace = true
+categories.workspace = true
+readme = "README.md"
+# The crate compiles C sources that live outside its own directory and is an
+# internal boundary rather than a published interface, so it is not packaged.
+publish = false
+links = "hydrax_kernels"
+
+[build-dependencies]
+cc.workspace = true
+
+# The workspace forbids unsafe code. This crate is the single exception: it is
+# where the C ABI is declared and called, and confining every `unsafe` block to
+# one crate is what lets every other crate keep the prohibition. The remaining
+# lints match the workspace, and `unsafe_op_in_unsafe_fn` plus
+# `undocumented_unsafe_blocks` narrow the exception further: an unsafe function
+# is not itself an unsafe block, and every block that is one carries the
+# argument for why it is sound.
+[lints.rust]
+missing_docs = "warn"
+unsafe_code = "allow"
+unsafe_op_in_unsafe_fn = "deny"
+
+[lints.clippy]
+all = "warn"
+pedantic = "warn"
+undocumented_unsafe_blocks = "warn"
+unwrap_used = "warn"
