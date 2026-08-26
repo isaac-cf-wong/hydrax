@@ -41,6 +41,90 @@ jobs:
             - name: Build docs
               run: cargo doc --no-deps --all-features
 
+    msrv:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+            - name: Install Rust
+              uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+              with:
+                  toolchain: "1.85"
+
+            - name: Cache Cargo
+              uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+
+            - name: Check the minimum supported Rust version
+              # rust-toolchain.toml pins the channel for everyday use, and a
+              # toolchain file outranks an installed default, so a bare `cargo`
+              # here would silently check stable again. The explicit `+1.85`
+              # outranks the file and checks the version the manifests promise.
+              # `--locked` keeps the resolved dependencies to the committed
+              # lockfile, so the answer is about this crate rather than about
+              # whichever dependency versions the day's index happened to offer.
+              run: cargo +1.85 check --all-targets --all-features --locked
+
+    package:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+            - name: Install Rust
+              uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+              with:
+                  toolchain: stable
+
+            - name: Cache Cargo
+              uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+
+            - name: Package the publishable crates
+              # The same check the release runs, moved to every change so that a
+              # packaging break is found before a tag exists rather than after.
+              # hydrax-kernels-sys is excluded because it is `publish = false`:
+              # it compiles C sources from outside its own directory, which a
+              # packaged copy of it does not carry.
+              run: cargo package --workspace --exclude hydrax-kernels-sys --locked
+
+    deny:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+            - name: Install Rust
+              uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+              with:
+                  toolchain: stable
+
+            - name: Cache Cargo
+              uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+
+            - name: Install cargo-deny
+              run: cargo install cargo-deny --locked
+
+            - name: Check advisories, licences, bans, and sources
+              # deny.toml states which licences the dependency tree may carry
+              # and which registries it may come from. Nothing enforced that
+              # policy until this job existed.
+              run: cargo deny check
+
+    documentation:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+            - name: Install uv
+              uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+              with:
+                  python-version: "3.14.3"
+                  enable-cache: "true"
+
+            - name: Build the documentation site
+              # Strict, so that a link to a page that does not exist fails the
+              # build instead of shipping a 404 to readers. The deploy workflow
+              # only runs on main and only when Pages is enabled, so without
+              # this the first sign of a broken link would be a published one.
+              run: uvx zensical build --strict
+
     audit:
         runs-on: ubuntu-latest
         steps:

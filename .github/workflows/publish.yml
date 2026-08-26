@@ -52,7 +52,11 @@ jobs:
                   fi
 
             - name: Verify packages
-              run: cargo package --workspace
+              # hydrax-kernels-sys is `publish = false`: it compiles C sources
+              # that live outside its own directory, so a packaged copy of it
+              # cannot build and packaging it would fail the release. Excluding
+              # it here makes this step check exactly the set that is published.
+              run: cargo package --workspace --exclude hydrax-kernels-sys
 
             - name: Note publish status
               if: vars.PUBLISH_TO_CRATES_IO != 'true'
@@ -104,4 +108,5 @@ jobs:
             - name: Publish crates
               # --workspace publishes the workspace members in dependency
               # order, so hydrax-core lands before the crates that require it.
-              run: cargo publish --workspace --token "${{ secrets.CARGO_REGISTRY_TOKEN }}"
+              # hydrax-kernels-sys is excluded for the reason given in `verify`.
+              run: cargo publish --workspace --exclude hydrax-kernels-sys --token "${{ secrets.CARGO_REGISTRY_TOKEN }}"

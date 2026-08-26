@@ -21,6 +21,29 @@ Rust caller changing.
 > verification and is not yet a complete CCSN simulation. No published results
 > should currently be based on it.
 
+## Installation
+
+Hydrax targets stable Rust and supports Rust 1.85 or newer, the release that
+introduced the 2024 edition. Add the library to a project:
+
+```shell
+cargo add hydrax
+```
+
+Or install the command-line tool:
+
+```shell
+cargo install hydrax-cli
+```
+
+Building from a checkout additionally needs a C compiler for the kernels in
+`kernels/`; the `cc` build script finds the platform's default.
+
+Hydrax follows semantic versioning, with the pre-1.0 convention that a minor
+release may make breaking changes. That policy covers the `hydrax` facade. The
+layer crates beneath it are published so that `hydrax` can depend on them rather
+than so that callers can, and `hydrax-kernels-sys` is not published at all.
+
 ## First milestone
 
 The first scientific milestone generates observer-dependent gravitational-wave
@@ -28,7 +51,8 @@ polarizations from a prescribed mass-quadrupole time series. The time- and
 frequency-domain foundation now includes second- and fourth-order centered
 finite differences, explicit Fourier normalization, and configurable window
 functions. It is verified against analytic sources, symmetry constraints,
-distance scaling, convergence tests, exact discrete spectra, and analytic
+distance scaling, grid-refinement convergence tests that measure each operator's
+order of accuracy against a closed form, exact discrete spectra, and analytic
 radiated-energy calculations. Versioned CSV schemas and JSON provenance
 sidecars make demonstration runs machine-readable and auditable.
 
@@ -71,6 +95,7 @@ cargo fmt --all --check
 cargo clippy --all-targets --all-features -- -D warnings
 cargo test --all-features
 cargo doc --no-deps --all-features
+pre-commit run --all-files
 ```
 
 Generate a demonstration waveform as CSV:
@@ -165,7 +190,10 @@ conventions and validity limits are documented in the
 a run accepts are documented in
 [run configuration files](docs/design/run-configuration.md), and the stable
 column definitions and provenance fields in
-[output formats and provenance](docs/design/output-formats.md).
+[output formats and provenance](docs/design/output-formats.md). What each
+discrete operator approximates, the order it converges at, how that order was
+measured, and which operators are not yet covered are recorded in
+[convergence and orders of accuracy](docs/design/convergence.md).
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the complete development workflow.
 

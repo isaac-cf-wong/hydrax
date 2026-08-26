@@ -17,6 +17,7 @@ nav = [
     { "Run configuration" = "design/run-configuration.md" },
     { "Output formats and provenance" = "design/output-formats.md" },
     { "The kernel ABI" = "design/kernel-abi.md" },
+    { "Convergence and orders of accuracy" = "design/convergence.md" },
   ] },
   { "Contributing" = "contributing.md" },
   { "Security" = "security.md" },
