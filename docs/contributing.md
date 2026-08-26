@@ -1,3 +1,4 @@
 # Contributing
 
-See the repository [contributing guide](../CONTRIBUTING.md).
+See the repository
+[contributing guide](https://github.com/isaac-cf-wong/hydrax/blob/main/CONTRIBUTING.md).
