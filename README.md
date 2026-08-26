@@ -11,9 +11,10 @@ waves from core-collapse supernovae. It will grow incrementally from analytic
 quadrupole waveforms and idealized collapse models toward relativistic
 multidimensional radiation hydrodynamics.
 
-Rust will provide the safe public API, simulation orchestration, testing, and
-I/O. Performance-critical numerical kernels may be implemented in portable C
-behind a small, versioned interface.
+Rust provides the safe public API, simulation orchestration, testing, and I/O.
+Performance-critical numerical kernels are implemented in portable C behind a
+small, versioned interface, so that a GPU backend can replace them without the
+Rust caller changing.
 
 > [!IMPORTANT]
 > Hydrax is in early development. Its quadrupole waveform API is intended for
@@ -41,18 +42,25 @@ requires at least axisymmetry.
 
 Hydrax is a Cargo workspace with a narrow boundary between its layers:
 
-| Crate                | Contents                                                    |
-| -------------------- | ----------------------------------------------------------- |
-| `crates/hydrax`      | Safe public API; re-exports the layers below                |
-| `crates/hydrax-cli`  | The `hydrax` binary                                         |
-| `crates/hydrax-core` | SI and geometrized units, tensors, conventions, error types |
-| `crates/hydrax-wave` | Quadrupole sources, polarizations, spectra, radiated energy |
-| `crates/hydrax-io`   | Run configuration, provenance, and output serialization     |
+| Crate                       | Contents                                                    |
+| --------------------------- | ----------------------------------------------------------- |
+| `crates/hydrax`             | Safe public API; re-exports the layers below                |
+| `crates/hydrax-cli`         | The `hydrax` binary                                         |
+| `crates/hydrax-core`        | SI and geometrized units, tensors, conventions, error types |
+| `crates/hydrax-wave`        | Quadrupole sources, polarizations, spectra, radiated energy |
+| `crates/hydrax-io`          | Run configuration, provenance, and output serialization     |
+| `crates/hydrax-kernels-sys` | Private, unpublished bindings to the compiled kernels       |
+| `kernels/`                  | The C11 kernel ABI and its portable CPU implementation      |
 
 Depend on `hydrax` rather than on a layer directly: the internal boundaries
 will move as the physics grows, while the facade stays stable. Every crate
-keeps `unsafe_code = "forbid"`; unsafe code is confined to the future
-`hydrax-kernels-sys` FFI crate.
+keeps `unsafe_code = "forbid"` except `hydrax-kernels-sys`, which is where the
+kernel ABI is declared and called, and which holds nothing else.
+
+The kernel boundary is documented in
+[the kernel ABI](docs/design/kernel-abi.md): how it is versioned, why the
+version is checked three ways, and how each compiled kernel is differentially
+tested against a slow safe-Rust reference.
 
 ## Development
 

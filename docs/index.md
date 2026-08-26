@@ -5,8 +5,8 @@ gravitational waves from core-collapse supernovae.
 
 The implementation will progress from analytic quadrupole waveforms through
 verified collapse hydrodynamics to relativistic multidimensional models. Rust
-will provide the safe public API and orchestration, with optional portable C
-kernels for performance-critical calculations.
+provides the safe public API and orchestration, with portable C kernels behind
+a versioned interface for performance-critical calculations.
 
 The first time-domain quadrupole waveform API is available for verification.
 It is not yet a complete CCSN simulation.
@@ -18,7 +18,8 @@ The public API lives in the `hydrax` crate, which re-exports three layers:
 waveforms, spectra, energy), and `hydrax-io` (run configuration and
 provenance). The `hydrax-cli` crate builds the `hydrax` binary. Depend on
 `hydrax` rather than on a layer, so internal boundaries can move without
-breaking callers.
+breaking callers. The private `hydrax-kernels-sys` crate binds the compiled
+kernels in `kernels/` and is the only crate that may contain unsafe code.
 
 ## Local Checks
 
@@ -69,3 +70,7 @@ run accepts and where each one comes from.
 
 See [output formats and provenance](design/output-formats.md) for the CSV
 schemas and reproducibility record.
+
+See [the kernel ABI](design/kernel-abi.md) for the boundary between Rust and
+the compiled kernels, how it is versioned, and how the kernels are
+differentially tested.
