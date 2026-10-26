@@ -49,7 +49,7 @@ impl Workspace {
         // A canonical base directory keeps the paths the script emits
         // comparable with the fixture's own, whatever `TMPDIR` points through.
         let base = std::env::temp_dir();
-        let base = fs::canonicalize(&base).unwrap_or(base);
+        let base = plain(fs::canonicalize(&base).unwrap_or(base));
         let root = base.join(format!(
             "hydrax-io-build-script-{}-{name}",
             std::process::id()
@@ -267,6 +267,9 @@ impl Record {
     }
 
     /// Whether the script warned that it could not watch something.
+    ///
+    /// Only the Unix-only checks build a name the script cannot watch.
+    #[cfg(unix)]
     fn warned(&self) -> bool {
         self.lines()
             .any(|line| line.starts_with(b"cargo:warning=".as_slice()))
@@ -295,6 +298,25 @@ fn path_of(name: &[u8]) -> Option<PathBuf> {
     (!name.is_empty())
         .then(|| std::str::from_utf8(name).ok().map(PathBuf::from))
         .flatten()
+}
+
+/// Drop the `\\?\` prefix Windows puts on a canonical path.
+///
+/// The prefix is spelled differently from the working directory that Cargo
+/// reports to a build script, so a fixture path that keeps it never equals a
+/// path the script emits.
+#[cfg(windows)]
+fn plain(path: PathBuf) -> PathBuf {
+    match path.to_str().and_then(|text| text.strip_prefix(r"\\?\")) {
+        Some(rest) if !rest.starts_with(r"UNC\") => PathBuf::from(rest),
+        _ => path,
+    }
+}
+
+/// Nothing to drop where a canonical path carries no prefix.
+#[cfg(not(windows))]
+fn plain(path: PathBuf) -> PathBuf {
+    path
 }
 
 /// Host target triple, which Cargo also uses as a layout directory name.
@@ -597,7 +619,10 @@ fn a_deleted_tracked_file_reruns_the_script_exactly_once() {
 /// state unnoticed. The awkward file itself cannot be named in a directive —
 /// Cargo decodes directives as UTF-8 and drops what it cannot decode, measured
 /// directly — so the directory holding it is watched instead.
-#[cfg(unix)]
+///
+/// macOS refuses to create a name that is not valid UTF-8 (`EILSEQ`), so the
+/// fixture cannot be built there and the check is left out.
+#[cfg(all(unix, not(target_os = "macos")))]
 #[test]
 fn a_non_utf8_pathname_costs_only_itself() {
     let workspace = Workspace::create("non-utf8-name");
