@@ -49,7 +49,7 @@ impl Workspace {
         // A canonical base directory keeps the paths the script emits
         // comparable with the fixture's own, whatever `TMPDIR` points through.
         let base = std::env::temp_dir();
-        let base = fs::canonicalize(&base).unwrap_or(base);
+        let base = plain(fs::canonicalize(&base).unwrap_or(base));
         let root = base.join(format!(
             "hydrax-io-build-script-{}-{name}",
             std::process::id()
@@ -298,6 +298,25 @@ fn path_of(name: &[u8]) -> Option<PathBuf> {
     (!name.is_empty())
         .then(|| std::str::from_utf8(name).ok().map(PathBuf::from))
         .flatten()
+}
+
+/// Drop the `\\?\` prefix Windows puts on a canonical path.
+///
+/// The prefix is spelled differently from the working directory that Cargo
+/// reports to a build script, so a fixture path that keeps it never equals a
+/// path the script emits.
+#[cfg(windows)]
+fn plain(path: PathBuf) -> PathBuf {
+    match path.to_str().and_then(|text| text.strip_prefix(r"\\?\")) {
+        Some(rest) if !rest.starts_with(r"UNC\") => PathBuf::from(rest),
+        _ => path,
+    }
+}
+
+/// Nothing to drop where a canonical path carries no prefix.
+#[cfg(not(windows))]
+fn plain(path: PathBuf) -> PathBuf {
+    path
 }
 
 /// Host target triple, which Cargo also uses as a layout directory name.
