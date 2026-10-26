@@ -5,6 +5,7 @@
 [![Crates.io](https://img.shields.io/crates/v/hydrax)](https://crates.io/crates/hydrax)
 [![Docs.rs](https://docs.rs/hydrax/badge.svg)](https://docs.rs/hydrax)
 [![License](https://img.shields.io/badge/License-BSD_3--Clause-blue.svg)](LICENSE)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.23673313.svg)](https://doi.org/10.5281/zenodo.23673313)
 
 Hydrax is a Rust package for developing verified simulations of gravitational
 waves from core-collapse supernovae. It will grow incrementally from analytic
