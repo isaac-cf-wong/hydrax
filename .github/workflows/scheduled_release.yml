@@ -82,10 +82,10 @@ jobs:
 
                     NEW_VERSION="${NEW_TAG#v}"
                     NEW_VERSION="$NEW_VERSION" python3 - <<'PY'
+                  import datetime
                   import os
-                  from pathlib import Path
-
                   import re
+                  from pathlib import Path
 
                   cargo_toml = Path("Cargo.toml")
                   version = os.environ["NEW_VERSION"]
@@ -124,15 +124,36 @@ jobs:
                       )
 
                   cargo_toml.write_text("".join(lines), encoding="utf-8")
+
+                  # The citation file carries the metadata that Zenodo reads when
+                  # the release is published, so its version and date follow the
+                  # tag too.
+                  citation = Path("CITATION.cff")
+                  citation_text = citation.read_text(encoding="utf-8")
+                  citation_text, version_count = re.subn(
+                      r'(?m)^(version:\s+)"[\d.]+"',
+                      rf'\g<1>"{version}"',
+                      citation_text,
+                  )
+                  citation_text, date_count = re.subn(
+                      r'(?m)^(date-released:\s+)"\d{4}-\d{2}-\d{2}"',
+                      rf'\g<1>"{datetime.date.today().isoformat()}"',
+                      citation_text,
+                  )
+                  if not (version_count and date_count):
+                      raise SystemExit(
+                          "Could not find version and date-released in CITATION.cff"
+                      )
+                  citation.write_text(citation_text, encoding="utf-8")
                   PY
                     cargo generate-lockfile
 
-                    if ! git diff --quiet -- Cargo.toml Cargo.lock; then
-                      git add Cargo.toml Cargo.lock
+                    if ! git diff --quiet -- Cargo.toml Cargo.lock CITATION.cff; then
+                      git add Cargo.toml Cargo.lock CITATION.cff
                       git commit -m "chore(release): prepare for $NEW_TAG [skip ci]"
                       git push origin "HEAD:${GITHUB_REF_NAME}"
                     else
-                      echo "Cargo.toml and Cargo.lock already match $NEW_TAG"
+                      echo "Cargo.toml, Cargo.lock and CITATION.cff already match $NEW_TAG"
                     fi
 
                     git tag -a "$NEW_TAG" -m "Release $NEW_TAG"
