@@ -267,6 +267,9 @@ impl Record {
     }
 
     /// Whether the script warned that it could not watch something.
+    ///
+    /// Only the Unix-only checks build a name the script cannot watch.
+    #[cfg(unix)]
     fn warned(&self) -> bool {
         self.lines()
             .any(|line| line.starts_with(b"cargo:warning=".as_slice()))
@@ -597,7 +600,10 @@ fn a_deleted_tracked_file_reruns_the_script_exactly_once() {
 /// state unnoticed. The awkward file itself cannot be named in a directive —
 /// Cargo decodes directives as UTF-8 and drops what it cannot decode, measured
 /// directly — so the directory holding it is watched instead.
-#[cfg(unix)]
+///
+/// macOS refuses to create a name that is not valid UTF-8 (`EILSEQ`), so the
+/// fixture cannot be built there and the check is left out.
+#[cfg(all(unix, not(target_os = "macos")))]
 #[test]
 fn a_non_utf8_pathname_costs_only_itself() {
     let workspace = Workspace::create("non-utf8-name");
