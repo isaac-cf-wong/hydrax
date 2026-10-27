@@ -2,8 +2,8 @@ cff-version: 1.2.0
 title: "Hydrax: Core-collapse supernova gravitational-wave simulation tools"
 license: "BSD-3-Clause"
 type: software
-version: "0.1.0"
-date-released: "2026-10-26"
+version: "0.1.1"
+date-released: "2026-10-27"
 authors:
     - given-names: Isaac C. F.
       family-names: Wong

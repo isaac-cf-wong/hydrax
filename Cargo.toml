@@ -3,7 +3,7 @@ members = ["crates/*"]
 resolver = "3"
 
 [workspace.package]
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 rust-version = "1.85"
 authors = ["Isaac C. F. Wong"]
@@ -15,11 +15,11 @@ keywords = ["astrophysics", "simulation", "gravitational-waves", "supernova"]
 categories = ["science", "simulation"]
 
 [workspace.dependencies]
-hydrax = { version = "0.1.0", path = "crates/hydrax" }
-hydrax-core = { version = "0.1.0", path = "crates/hydrax-core" }
-hydrax-io = { version = "0.1.0", path = "crates/hydrax-io" }
-hydrax-kernels-sys = { version = "0.1.0", path = "crates/hydrax-kernels-sys" }
-hydrax-wave = { version = "0.1.0", path = "crates/hydrax-wave" }
+hydrax = { version = "0.1.1", path = "crates/hydrax" }
+hydrax-core = { version = "0.1.1", path = "crates/hydrax-core" }
+hydrax-io = { version = "0.1.1", path = "crates/hydrax-io" }
+hydrax-kernels-sys = { version = "0.1.1", path = "crates/hydrax-kernels-sys" }
+hydrax-wave = { version = "0.1.1", path = "crates/hydrax-wave" }
 cc = "1.10.0"
 clap = { version = "4.6.7", features = ["derive"] }
 rustfft = "6.4.1"
