@@ -18,11 +18,22 @@ jobs:
               with:
                   fetch-depth: 0
 
-            - name: Check for new commits
+            # Release only when something that reaches the published crates changed
+            # since the latest tag: their sources and the files they include, the
+            # build scripts' declared inputs, Cargo.toml outside dev-only tables,
+            # Cargo.lock (hydrax-cli ships a binary), the readmes or the license.
+            # The C kernels that hydrax-kernels-sys compiles are listed in `paths`,
+            # because its build script names them at build time. Tests, benches,
+            # examples, docs, CI and dev-dependency bumps do not count.
+            - name: Check for crate changes
               id: check_commits
-              uses: isaac-cf-wong/detect-git-changes-action@50cc47e09e21348f8e5a3231544c7ec317121df6 # v0.0.17
+              uses: isaac-cf-wong/detect-git-changes-action@fd41a9c5553a9148e8f78399855fd19e04801501 # v0.2.0
               with:
                   use-latest-tag: true
+                  preset: rust
+                  paths: |
+                      kernels/include
+                      kernels/src
 
     ci:
         needs: check_new_commits
