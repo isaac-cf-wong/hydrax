@@ -20,7 +20,7 @@ hydrax-core = { version = "0.1.1", path = "crates/hydrax-core" }
 hydrax-io = { version = "0.1.1", path = "crates/hydrax-io" }
 hydrax-kernels-sys = { version = "0.1.1", path = "crates/hydrax-kernels-sys" }
 hydrax-wave = { version = "0.1.1", path = "crates/hydrax-wave" }
-cc = "1.10.0"
+cc = "1.11.0"
 clap = { version = "4.6.7", features = ["derive"] }
 rustfft = "6.4.1"
 serde = { version = "1.0.229", features = ["derive"] }
